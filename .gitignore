@@ -1,0 +1,22 @@
+# intermediate files
+build
+lib
+bin
+ipch
+
+# vs solution temp files
+vs2010/*.sdf
+vs2010/*.opensdf
+vs2010/*.suo
+vs2010/*.user
+
+vs2012/*.sdf
+vs2012/*.opensdf
+vs2012/*.suo
+vs2012/*.user
+
+# vim temp file
+*.swp
+
+# mac stuff
+.DS_Store
