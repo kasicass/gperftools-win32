@@ -101,7 +101,7 @@ const char HeapProfileTable::kFileExt[] = ".heap";
 
 // Size for alloc_table_ and mmap_table_.
 static const int kHashTableSize = 179999;
-/*static*/ const int HeapProfileTable::kMaxStackDepth;
+// /*static*/ const int HeapProfileTable::kMaxStackDepth;
 
 //----------------------------------------------------------------------
 

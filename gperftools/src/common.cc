@@ -49,11 +49,14 @@ static const int32 kDefaultTransferNumObjecs = 32768;
 // initialization after a malloc/new call.
 static inline void InitTCMallocTransferNumObjects()
 {
+  FLAGS_tcmalloc_transfer_num_objects = kDefaultTransferNumObjecs;
+#if 0
   if (UNLIKELY(FLAGS_tcmalloc_transfer_num_objects == 0)) {
     const char *envval = getenv("TCMALLOC_TRANSFER_NUM_OBJ");
     FLAGS_tcmalloc_transfer_num_objects = !envval ? kDefaultTransferNumObjecs :
       strtol(envval, NULL, 10);
   }
+#endif
 }
 
 // Note: the following only works for "n"s that fit in 32-bits, but
