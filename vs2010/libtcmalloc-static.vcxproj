@@ -59,6 +59,7 @@
     <ClCompile Include="..\gperftools\src\central_freelist.cc" />
     <ClCompile Include="..\gperftools\src\common.cc" />
     <ClCompile Include="..\gperftools\src\heap-profile-table.cc" />
+    <ClCompile Include="..\gperftools\src\heap-profiler.cc" />
     <ClCompile Include="..\gperftools\src\internal_logging.cc" />
     <ClCompile Include="..\gperftools\src\malloc_extension.cc" />
     <ClCompile Include="..\gperftools\src\malloc_hook.cc" />

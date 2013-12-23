@@ -131,6 +131,7 @@
       <Filter>base</Filter>
     </ClCompile>
     <ClCompile Include="..\gperftools\src\thread_cache.cc" />
+    <ClCompile Include="..\gperftools\src\heap-profiler.cc" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="base">
