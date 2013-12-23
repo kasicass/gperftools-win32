@@ -1,10 +1,10 @@
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
-// 
+//
 //     * Redistributions of source code must retain the above copyright
 // notice, this list of conditions and the following disclaimer.
 //     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
 //     * Neither the name of Google Inc. nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
-// 
+//
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 // "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 // LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -185,8 +185,14 @@ template <bool>
 struct CompileAssert {
 };
 
+#ifdef HAVE___ATTRIBUTE__
+# define ATTRIBUTE_UNUSED __attribute__((unused))
+#else
+# define ATTRIBUTE_UNUSED
+#endif
+
 #define COMPILE_ASSERT(expr, msg)                               \
-  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1]
+  typedef CompileAssert<(bool(expr))> msg[bool(expr) ? 1 : -1] ATTRIBUTE_UNUSED
 
 #define arraysize(a)  (sizeof(a) / sizeof(*(a)))
 
@@ -331,8 +337,17 @@ class AssignAttributeStartEnd {
 
 #endif  // HAVE___ATTRIBUTE__ and __ELF__ or __MACH__
 
-#if defined(HAVE___ATTRIBUTE__) && (defined(__i386__) || defined(__x86_64__))
-# define CACHELINE_ALIGNED __attribute__((aligned(64)))
+#if defined(HAVE___ATTRIBUTE__)
+# if (defined(__i386__) || defined(__x86_64__))
+#   define CACHELINE_ALIGNED __attribute__((aligned(64)))
+# elif (defined(__PPC__) || defined(__PPC64__))
+#   define CACHELINE_ALIGNED __attribute__((aligned(16)))
+# elif (defined(__arm__))
+#   define CACHELINE_ALIGNED __attribute__((aligned(64)))
+    // some ARMs have shorter cache lines (ARM1176JZF-S is 32 bytes for example) but obviously 64-byte aligned implies 32-byte aligned
+# else
+#   error Could not determine cache line length - unknown architecture
+# endif
 #else
 # define CACHELINE_ALIGNED
 #endif  // defined(HAVE___ATTRIBUTE__) && (__i386__ || __x86_64__)

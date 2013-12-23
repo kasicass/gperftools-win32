@@ -45,6 +45,8 @@ extern "C" {
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
+#include <semaphore.h>
 
 #include "base/linux_syscall_support.h"
 #include "base/thread_lister.h"
@@ -94,6 +96,14 @@ static int local_clone (int (*fn)(void *), void *arg, ...)
 #endif
 #endif
 
+/* To avoid the gap cross page boundaries, increase by the large parge
+ * size mostly PowerPC system uses.  */
+#ifdef __PPC64__
+#define CLONE_STACK_SIZE 65536
+#else
+#define CLONE_STACK_SIZE 4096
+#endif
+
 static int local_clone (int (*fn)(void *), void *arg, ...) {
   /* Leave 4kB of gap between the callers stack and the new clone. This
    * should be more than sufficient for the caller to call waitpid() until
@@ -109,7 +119,7 @@ static int local_clone (int (*fn)(void *), void *arg, ...) {
    * is being debugged. This is OK and the error code will be reported
    * correctly.
    */
-  return sys_clone(fn, (char *)&arg - 4096,
+  return sys_clone(fn, (char *)&arg - CLONE_STACK_SIZE,
                    CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_UNTRACED, arg, 0, 0, 0);
 }
 
@@ -240,6 +250,7 @@ struct ListerParams {
   ListAllProcessThreadsCallBack callback;
   void        *parameter;
   va_list     ap;
+  sem_t       *lock;
 };
 
 
@@ -253,6 +264,13 @@ static void ListerThread(struct ListerParams *args) {
   int                max_threads = 0, sig;
   struct kernel_stat marker_sb, proc_sb;
   stack_t            altstack;
+
+  /* Wait for parent thread to set appropriate permissions
+   * to allow ptrace activity
+   */
+  if (sem_wait(args->lock) < 0) {
+    goto failure;
+  }
 
   /* Create "marker" that we can use to detect threads sharing the same
    * address space and the same file handles. By setting the FD_CLOEXEC flag
@@ -398,7 +416,7 @@ static void ListerThread(struct ListerParams *args) {
               /* Check if the marker is identical to the one we created      */
               if (sys_stat(fname, &tmp_sb) >= 0 &&
                   marker_sb.st_ino == tmp_sb.st_ino) {
-                long i, j;
+                long i;
 
                 /* Found one of our threads, make sure it is no duplicate    */
                 for (i = 0; i < num_threads; i++) {
@@ -434,28 +452,28 @@ static void ListerThread(struct ListerParams *args) {
                   sig_num_threads = num_threads;
                   goto next_entry;
                 }
-                while (sys_waitpid(pid, (int *)0, __WALL) < 0) {
+                /* Attaching to a process doesn't guarantee it'll stop before
+                 * ptrace returns; you have to wait on it.  Specifying __WCLONE
+                 * means it will only wait for clone children (i.e. threads,
+                 * not processes).
+                 */
+                while (sys_waitpid(pid, (int *)0, __WCLONE) < 0) {
                   if (errno != EINTR) {
-                    sys_ptrace_detach(pid);
-                    num_threads--;
-                    sig_num_threads = num_threads;
-                    goto next_entry;
+                    /* Assumes ECHILD                                        */
+                    if (pid == ppid) {
+                        /* The parent is not a clone                         */
+                        found_parent = true;
+                        break;
+                    } else {
+                        sys_ptrace_detach(pid);
+                        num_threads--;
+                        sig_num_threads = num_threads;
+                        goto next_entry;
+                    }
                   }
                 }
-                
-                if (sys_ptrace(PTRACE_PEEKDATA, pid, &i, &j) || i++ != j ||
-                    sys_ptrace(PTRACE_PEEKDATA, pid, &i, &j) || i   != j) {
-                  /* Address spaces are distinct, even though both
-                   * processes show the "marker". This is probably
-                   * a forked child process rather than a thread.
-                   */
-                  sys_ptrace_detach(pid);
-                  num_threads--;
-                  sig_num_threads = num_threads;
-                } else {
-                  found_parent |= pid == ppid;
-                  added_entries++;
-                }
+
+                added_entries++;
               }
             }
           }
@@ -536,6 +554,7 @@ int ListAllProcessThreads(void *parameter,
   pid_t                  clone_pid;
   int                    dumpable = 1, sig;
   struct kernel_sigset_t sig_blocked, sig_old;
+  sem_t                  lock;
 
   va_start(args.ap, callback);
 
@@ -565,6 +584,7 @@ int ListAllProcessThreads(void *parameter,
   args.altstack_mem = altstack_mem;
   args.parameter    = parameter;
   args.callback     = callback;
+  args.lock         = &lock;
 
   /* Before cloning the thread lister, block all asynchronous signals, as we */
   /* are not prepared to handle them.                                        */
@@ -596,42 +616,63 @@ int ListAllProcessThreads(void *parameter,
       #undef  SYS_LINUX_SYSCALL_SUPPORT_H
       #include "linux_syscall_support.h"
     #endif
-  
-    int clone_errno;
-    clone_pid = local_clone((int (*)(void *))ListerThread, &args);
-    clone_errno = errno;
 
-    sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
+    /* Lock before clone so that parent can set
+	 * ptrace permissions (if necessary) prior
+     * to ListerThread actually executing
+     */
+    if (sem_init(&lock, 0, 0) == 0) {
 
-    if (clone_pid >= 0) {
-      int status, rc;
-      while ((rc = sys0_waitpid(clone_pid, &status, __WALL)) < 0 &&
-             ERRNO == EINTR) {
-             /* Keep waiting                                                 */
-      }
-      if (rc < 0) {
-        args.err = ERRNO;
-        args.result = -1;
-      } else if (WIFEXITED(status)) {
-        switch (WEXITSTATUS(status)) {
-          case 0: break;             /* Normal process termination           */
-          case 2: args.err = EFAULT; /* Some fault (e.g. SIGSEGV) detected   */
-                  args.result = -1;
-                  break;
-          case 3: args.err = EPERM;  /* Process is already being traced      */
-                  args.result = -1;
-                  break;
-          default:args.err = ECHILD; /* Child died unexpectedly              */
-                  args.result = -1;
-                  break;
+      int clone_errno;
+      clone_pid = local_clone((int (*)(void *))ListerThread, &args);
+      clone_errno = errno;
+
+      sys_sigprocmask(SIG_SETMASK, &sig_old, &sig_old);
+
+      if (clone_pid >= 0) {
+#ifdef PR_SET_PTRACER
+        /* In newer versions of glibc permission must explicitly
+         * be given to allow for ptrace.
+         */
+        prctl(PR_SET_PTRACER, clone_pid, 0, 0, 0);
+#endif
+        /* Releasing the lock here allows the
+         * ListerThread to execute and ptrace us.
+		 */
+        sem_post(&lock);
+        int status, rc;
+        while ((rc = sys0_waitpid(clone_pid, &status, __WALL)) < 0 &&
+               ERRNO == EINTR) {
+                /* Keep waiting                                                 */
         }
-      } else if (!WIFEXITED(status)) {
-        args.err    = EFAULT;        /* Terminated due to an unhandled signal*/
+        if (rc < 0) {
+          args.err = ERRNO;
+          args.result = -1;
+        } else if (WIFEXITED(status)) {
+          switch (WEXITSTATUS(status)) {
+            case 0: break;             /* Normal process termination           */
+            case 2: args.err = EFAULT; /* Some fault (e.g. SIGSEGV) detected   */
+                    args.result = -1;
+                    break;
+            case 3: args.err = EPERM;  /* Process is already being traced      */
+                    args.result = -1;
+                    break;
+            default:args.err = ECHILD; /* Child died unexpectedly              */
+                    args.result = -1;
+                    break;
+          }
+        } else if (!WIFEXITED(status)) {
+          args.err    = EFAULT;        /* Terminated due to an unhandled signal*/
+          args.result = -1;
+        }
+        sem_destroy(&lock);
+      } else {
         args.result = -1;
+        args.err    = clone_errno;
       }
     } else {
       args.result = -1;
-      args.err    = clone_errno;
+      args.err    = errno;
     }
   }
 

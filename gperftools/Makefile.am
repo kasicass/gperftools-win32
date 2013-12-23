@@ -29,10 +29,15 @@ AM_CXXFLAGS += -Wall -Wwrite-strings -Woverloaded-virtual \
                -fno-builtin-calloc -fno-builtin-cfree \
                -fno-builtin-memalign -fno-builtin-posix_memalign \
                -fno-builtin-valloc -fno-builtin-pvalloc
+
 # On i386, -mmmx is needed for the mmx-based instructions in
-# atomicops-internal-x86.h.
+# atomicops-internal-x86.h. Also as of gcc 4.6, -fomit-frame-pointer
+# is the default. Since we must always have frame pointers for I386
+# in order to generate backtraces we now specify -fno-omit-frame-pointer
+# by default.
 if I386
 AM_CXXFLAGS += -mmmx
+AM_CXXFLAGS += -fno-omit-frame-pointer
 endif I386
 endif GCC
 if HAVE_W_NO_UNUSED_RESULT
@@ -121,8 +126,7 @@ googleinclude_HEADERS =				\
    src/google/malloc_hook_c.h			\
    src/google/profiler.h			\
    src/google/stacktrace.h			\
-   src/google/tcmalloc.h                        \
-   src/windows/google/tcmalloc.h
+   src/google/tcmalloc.h
 
 docdir = $(prefix)/share/doc/$(PACKAGE)-$(VERSION)
 # This is for HTML and other documentation you want to install.
@@ -217,7 +221,7 @@ libwindows_la_SOURCES = $(WINDOWS_INCLUDES) \
                         src/windows/preamble_patcher.cc \
                         src/windows/preamble_patcher_with_stub.cc
 # patch_functions.cc uses Psapi.lib.  MSVC has a #pragma for that, but not us.
-libwindows_la_LIBADD = -lPsapi
+libwindows_la_LIBADD = -lpsapi
 
 SPINLOCK_INCLUDES = src/base/spinlock.h \
                     src/base/spinlock_internal.h \
@@ -234,6 +238,7 @@ SPINLOCK_INCLUDES = src/base/spinlock.h \
 noinst_LTLIBRARIES += libspinlock.la
 libspinlock_la_SOURCES = src/base/spinlock.cc \
                          src/base/spinlock_internal.cc \
+                         src/base/atomicops-internals-x86.cc \
                          $(SPINLOCK_INCLUDES)
 
 LIBSPINLOCK = libwindows.la libspinlock.la libsysinfo.la liblogging.la
@@ -351,7 +356,7 @@ libstacktrace_la_SOURCES = src/stacktrace.cc \
                            $(STACKTRACE_INCLUDES)
 libstacktrace_la_LIBADD = $(UNWIND_LIBS) $(LIBSPINLOCK)
 STACKTRACE_SYMBOLS = '(GetStackTrace|GetStackFrames|GetStackTraceWithContext|GetStackFramesWithContext)'
-libstacktrace_la_LDFLAGS = -export-symbols-regex $(STACKTRACE_SYMBOLS)
+libstacktrace_la_LDFLAGS = -export-symbols-regex $(STACKTRACE_SYMBOLS) $(AM_LDFLAGS)
 
 ### Unittests
 TESTS += stacktrace_unittest
@@ -432,9 +437,8 @@ S_TCMALLOC_MINIMAL_INCLUDES = src/common.h \
 SG_TCMALLOC_MINIMAL_INCLUDES = src/gperftools/malloc_hook.h \
                                src/gperftools/malloc_hook_c.h \
                                src/gperftools/malloc_extension.h \
-                               src/gperftools/malloc_extension_c.h \
-                               src/gperftools/stacktrace.h
-TCMALLOC_MINIMAL_INCLUDES = $(S_TCMALLOC_MINIMAL_INCLUDES) $(SG_TCMALLOC_MINIMAL_INCLUDES)
+                               src/gperftools/malloc_extension_c.h
+TCMALLOC_MINIMAL_INCLUDES = $(S_TCMALLOC_MINIMAL_INCLUDES) $(SG_TCMALLOC_MINIMAL_INCLUDES) $(SG_STACKTRACE_INCLUDES)
 perftoolsinclude_HEADERS += $(SG_TCMALLOC_MINIMAL_INCLUDES)
 
 ### Making the library
@@ -465,7 +469,7 @@ libtcmalloc_minimal_internal_la_CXXFLAGS = -DNO_TCMALLOC_SAMPLES \
                                            -DNO_HEAP_CHECK \
                                            $(PTHREAD_CFLAGS) -DNDEBUG \
                                            $(AM_CXXFLAGS) $(NO_EXCEPTIONS)
-libtcmalloc_minimal_internal_la_LDFLAGS = $(PTHREAD_CFLAGS)
+libtcmalloc_minimal_internal_la_LDFLAGS = $(PTHREAD_CFLAGS) $(AM_LDFLAGS)
 libtcmalloc_minimal_internal_la_LIBADD = $(PTHREAD_LIBS) $(LIBSPINLOCK)
 
 lib_LTLIBRARIES += libtcmalloc_minimal.la
@@ -474,7 +478,7 @@ libtcmalloc_minimal_la_SOURCES = $(TCMALLOC_CC) $(TCMALLOC_MINIMAL_INCLUDES)
 libtcmalloc_minimal_la_CXXFLAGS = -DNO_TCMALLOC_SAMPLES \
                                   $(PTHREAD_CFLAGS) -DNDEBUG $(AM_CXXFLAGS)
 # -version-info gets passed to libtool
-libtcmalloc_minimal_la_LDFLAGS = $(PTHREAD_CFLAGS) -version-info @TCMALLOC_SO_VERSION@
+libtcmalloc_minimal_la_LDFLAGS = $(PTHREAD_CFLAGS) -version-info @TCMALLOC_SO_VERSION@ $(AM_LDFLAGS)
 libtcmalloc_minimal_la_LIBADD = libtcmalloc_minimal_internal.la $(PTHREAD_LIBS)
 
 # For windows, we're playing around with trying to do some stacktrace
@@ -535,6 +539,12 @@ tcmalloc_minimal_large_unittest_SOURCES = src/tests/tcmalloc_large_unittest.cc
 tcmalloc_minimal_large_unittest_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS)
 tcmalloc_minimal_large_unittest_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
 tcmalloc_minimal_large_unittest_LDADD = $(LIBTCMALLOC_MINIMAL) $(PTHREAD_LIBS)
+
+TESTS += tcmalloc_minimal_large_heap_fragmentation_unittest
+tcmalloc_minimal_large_heap_fragmentation_unittest_SOURCES = src/tests/large_heap_fragmentation_unittest.cc
+tcmalloc_minimal_large_heap_fragmentation_unittest_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS)
+tcmalloc_minimal_large_heap_fragmentation_unittest_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
+tcmalloc_minimal_large_heap_fragmentation_unittest_LDADD = $(LIBTCMALLOC_MINIMAL) $(PTHREAD_LIBS)
 
 # This tests it works to LD_PRELOAD libtcmalloc (tests maybe_threads.cc)
 # In theory this should work under mingw, but mingw has trouble running
@@ -842,10 +852,10 @@ S_TCMALLOC_INCLUDES = $(S_TCMALLOC_MINIMAL_INCLUDES) \
                       src/base/sysinfo.h \
                       src/base/thread_lister.h \
                       src/heap-profile-table.h
-SG_TCMALLOC_INCLUDES = $(SG_TCMALLOC_MINIMAL_INCLUDES) \
-                       src/gperftools/heap-profiler.h \
+SG_TCMALLOC_INCLUDES = src/gperftools/heap-profiler.h \
                        src/gperftools/heap-checker.h
-TCMALLOC_INCLUDES = $(S_TCMALLOC_INCLUDES) $(SG_TCMALLOC_INCLUDES)
+TCMALLOC_INCLUDES = $(S_TCMALLOC_INCLUDES) $(SG_TCMALLOC_MINIMAL_INCLUDES) \
+		    $(SG_TCMALLOC_INCLUDES) $(SG_STACKTRACE_INCLUDES)
 perftoolsinclude_HEADERS += $(SG_TCMALLOC_INCLUDES)
 
 ### Making the library
@@ -895,8 +905,16 @@ LIBS_TO_WEAKEN += libtcmalloc.la
 
 ### Unittests
 
-TESTS += tcmalloc_unittest
-TCMALLOC_UNITTEST_INCLUDES = src/config_for_unittests.h \
+TESTS += tcmalloc_unittest.sh$(EXEEXT)
+tcmalloc_unittest_sh_SOURCES = src/tests/tcmalloc_unittest.sh
+noinst_SCRIPTS += $(tcmalloc_unittest_sh_SOURCES)
+tcmalloc_unittest.sh$(EXEEXT): $(top_srcdir)/$(tcmalloc_unittest_sh_SOURCES) \
+                               tcmalloc_unittest
+	rm -f $@
+	cp -p $(top_srcdir)/$(tcmalloc_unittest_sh_SOURCES) $@
+
+noinst_PROGRAMS += tcmalloc_unittest
+tcmalloc_unittest_INCLUDES = src/config_for_unittests.h \
                              src/gperftools/malloc_extension.h
 tcmalloc_unittest_SOURCES = src/tests/tcmalloc_unittest.cc \
                             src/tcmalloc.h \
@@ -952,6 +970,12 @@ tcmalloc_large_unittest_SOURCES = src/tests/tcmalloc_large_unittest.cc
 tcmalloc_large_unittest_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS)
 tcmalloc_large_unittest_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
 tcmalloc_large_unittest_LDADD = $(LIBTCMALLOC) $(PTHREAD_LIBS)
+
+TESTS += tcmalloc_large_heap_fragmentation_unittest
+tcmalloc_large_heap_fragmentation_unittest_SOURCES = src/tests/large_heap_fragmentation_unittest.cc
+tcmalloc_large_heap_fragmentation_unittest_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS)
+tcmalloc_large_heap_fragmentation_unittest_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
+tcmalloc_large_heap_fragmentation_unittest_LDADD = $(LIBTCMALLOC) $(PTHREAD_LIBS)
 
 TESTS += raw_printer_test
 raw_printer_test_SOURCES = src/tests/raw_printer_test.cc
@@ -1186,9 +1210,9 @@ S_CPU_PROFILER_INCLUDES = src/profiledata.h \
                           src/base/sysinfo.h \
                           $(SPINLOCK_INCLUDES) \
                           $(LOGGING_INCLUDES)
-SG_CPU_PROFILER_INCLUDES = src/gperftools/profiler.h \
-                           src/gperftools/stacktrace.h
-CPU_PROFILER_INCLUDES = $(S_CPU_PROFILER_INCLUDES) $(SG_CPU_PROFILER_INCLUDES)
+SG_CPU_PROFILER_INCLUDES = src/gperftools/profiler.h
+CPU_PROFILER_INCLUDES = $(S_CPU_PROFILER_INCLUDES) $(SG_CPU_PROFILER_INCLUDES) \
+			$(SG_STACKTRACE_INCLUDES)
 perftoolsinclude_HEADERS += $(SG_CPU_PROFILER_INCLUDES)
 
 ### Making the library

@@ -390,7 +390,10 @@ EXTERN_C PERFTOOLS_DLL_DECL void WriteToStderr(const char* buf, int len);
 
 /* ----------------------------------- SYSTEM/PROCESS */
 
+#ifndef HAVE_PID_T
 typedef int pid_t;
+#endif
+
 #if __STDC__ && !defined(__MINGW32__)
 inline pid_t getpid(void) { return _getpid(); }
 #endif
@@ -404,16 +407,23 @@ inline int poll(struct pollfd* fds, int nfds, int timeout) {
   return 0;
 }
 
-EXTERN_C int getpagesize();   /* in port.cc */
+EXTERN_C PERFTOOLS_DLL_DECL int getpagesize();   /* in port.cc */
 
 /* ----------------------------------- OTHER */
 
 inline void srandom(unsigned int seed) { srand(seed); }
 inline long random(void) { return rand(); }
+
+#ifndef HAVE_DECL_SLEEP
+#define HAVE_DECL_SLEEP 0
+#endif
+
+#if !HAVE_DECL_SLEEP
 inline unsigned int sleep(unsigned int seconds) {
   Sleep(seconds * 1000);
   return 0;
 }
+#endif
 
 // mingw64 seems to define timespec (though mingw.org mingw doesn't),
 // protected by the _TIMESPEC_DEFINED macro.
@@ -424,10 +434,17 @@ struct timespec {
 };
 #endif
 
+#ifndef HAVE_DECL_NANOSLEEP
+#define HAVE_DECL_NANOSLEEP 0
+#endif
+
+// latest mingw64 has nanosleep. Earlier mingw and MSVC do not
+#if !HAVE_DECL_NANOSLEEP
 inline int nanosleep(const struct timespec *req, struct timespec *rem) {
   Sleep(req->tv_sec * 1000 + req->tv_nsec / 1000000);
   return 0;
 }
+#endif
 
 #ifndef __MINGW32__
 inline long long int strtoll(const char *nptr, char **endptr, int base) {

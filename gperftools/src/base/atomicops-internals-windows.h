@@ -137,6 +137,18 @@ inline Atomic32 NoBarrier_AtomicExchange(volatile Atomic32* ptr,
   return static_cast<Atomic32>(result);
 }
 
+inline Atomic32 Acquire_AtomicExchange(volatile Atomic32* ptr,
+                                       Atomic32 new_value) {
+  // FastInterlockedExchange has both acquire and release memory barriers.
+  return NoBarrier_AtomicExchange(ptr, new_value);
+}
+
+inline Atomic32 Release_AtomicExchange(volatile Atomic32* ptr,
+                                       Atomic32 new_value) {
+  // FastInterlockedExchange has both acquire and release memory barriers.
+  return NoBarrier_AtomicExchange(ptr, new_value);
+}
+
 inline Atomic32 Barrier_AtomicIncrement(volatile Atomic32* ptr,
                                         Atomic32 increment) {
   return FastInterlockedExchangeAdd(
@@ -188,8 +200,7 @@ inline void NoBarrier_Store(volatile Atomic32* ptr, Atomic32 value) {
 }
 
 inline void Acquire_Store(volatile Atomic32* ptr, Atomic32 value) {
-  NoBarrier_AtomicExchange(ptr, value);
-              // acts as a barrier in this implementation
+  Acquire_AtomicExchange(ptr, value);
 }
 
 inline void Release_Store(volatile Atomic32* ptr, Atomic32 value) {
@@ -434,16 +445,14 @@ inline Atomic64 Barrier_AtomicIncrement(volatile Atomic64* ptr,
 #endif
 }
 
-inline void NoBarrier_Store(volatile Atomic64* ptr, Atomic64 value) {
-#if 0 // Not implemented
-  __asm {
-    mov mm0, value;  // Use mmx reg for 64-bit atomic moves
-    mov ptr, mm0;
-    emms;            // Empty mmx state to enable FP registers
-  }
-#else
-  NotImplementedFatalError("NoBarrier_Store");
-#endif
+inline void NoBarrier_Store(volatile Atomic64* ptrValue, Atomic64 value)
+{
+ 	__asm {
+    	movq mm0, value;  // Use mmx reg for 64-bit atomic moves
+    	mov eax, ptrValue;
+    	movq [eax], mm0;
+    	emms;            // Empty mmx state to enable FP registers
+  	}
 }
 
 inline void Acquire_Store(volatile Atomic64* ptr, Atomic64 value) {
@@ -455,19 +464,16 @@ inline void Release_Store(volatile Atomic64* ptr, Atomic64 value) {
   NoBarrier_Store(ptr, value);
 }
 
-inline Atomic64 NoBarrier_Load(volatile const Atomic64* ptr) {
-#if 0 // Not implemented
-  Atomic64 value;
-  __asm {
-    mov mm0, ptr;    // Use mmx reg for 64-bit atomic moves
-    mov value, mm0;
-    emms;            // Empty mmx state to enable FP registers
+inline Atomic64 NoBarrier_Load(volatile const Atomic64* ptrValue)
+{
+  	Atomic64 value;
+  	__asm {
+    	mov eax, ptrValue;
+    	movq mm0, [eax]; // Use mmx reg for 64-bit atomic moves
+    	movq value, mm0;
+    	emms; // Empty mmx state to enable FP registers
   }
   return value;
-#else
-  NotImplementedFatalError("NoBarrier_Store");
-  return 0;
-#endif
 }
 
 inline Atomic64 Acquire_Load(volatile const Atomic64* ptr) {
@@ -482,6 +488,18 @@ inline Atomic64 Release_Load(volatile const Atomic64* ptr) {
 
 #endif  // defined(_WIN64) || defined(__MINGW64__)
 
+
+inline Atomic64 Acquire_AtomicExchange(volatile Atomic64* ptr,
+                                       Atomic64 new_value) {
+  // FastInterlockedExchange has both acquire and release memory barriers.
+  return NoBarrier_AtomicExchange(ptr, new_value);
+}
+
+inline Atomic64 Release_AtomicExchange(volatile Atomic64* ptr,
+                                       Atomic64 new_value) {
+  // FastInterlockedExchange has both acquire and release memory barriers.
+  return NoBarrier_AtomicExchange(ptr, new_value);
+}
 
 inline Atomic64 Acquire_CompareAndSwap(volatile Atomic64* ptr,
                                        Atomic64 old_value,

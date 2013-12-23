@@ -2,13 +2,13 @@
 ## In general, the safest way to proceed is to run ./autogen.sh
 
 # make sure we're interpreted by some minimal autoconf
-AC_PREREQ(2.57)
+AC_PREREQ([2.68])
 
-AC_INIT(gperftools, 2.0, google-perftools@googlegroups.com)
+AC_INIT([gperftools],[2.1],[google-perftools@googlegroups.com])
 # Update this value for every release!  (A:B:C will map to foo.so.(A-C).C.B)
 # http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-TCMALLOC_SO_VERSION=5:0:1
-PROFILER_SO_VERSION=3:0:3
+TCMALLOC_SO_VERSION=5:2:1
+PROFILER_SO_VERSION=3:2:3
 
 AC_SUBST(TCMALLOC_SO_VERSION)
 AC_SUBST(PROFILER_SO_VERSION)
@@ -19,7 +19,7 @@ AC_CONFIG_SRCDIR(README)
 AC_CONFIG_MACRO_DIR([m4])
 AC_CANONICAL_HOST
 AM_INIT_AUTOMAKE([dist-zip])
-AM_CONFIG_HEADER(src/config.h)
+AC_CONFIG_HEADERS([src/config.h])
 
 # Export the version information (for tc_version and friends)
 TC_VERSION_MAJOR=`expr "$PACKAGE_VERSION" : '\([[0-9]]*\)'`
@@ -92,29 +92,14 @@ AM_PROG_CC_C_O      # shrug: autogen.sh suddenly needs this for some reason
 AC_CHECK_TOOL([OBJCOPY], [objcopy], [])
 AS_IF([test -n "$OBJCOPY"], [dnl
   AC_CACHE_CHECK([if $OBJCOPY supports -W], gpt_cv_objcopy_weaken, [dnl
-    AC_LINK_IFELSE([void foo() {} int main() {return 0;}], [dnl
+    AC_LINK_IFELSE([AC_LANG_PROGRAM([void foo() {} int main() {return 0;}])], [dnl
       AS_IF(["$OBJCOPY" -W foo conftest$ac_exeext /dev/null],
       	    [gpt_cv_objcopy_weaken=yes], [gpt_cv_objcopy_weaken=no])],
     [gpt_cv_objcopy_weaken=no])])],
   [gpt_cv_objcopy_weaken=no])
 AM_CONDITIONAL(HAVE_OBJCOPY_WEAKEN, test $gpt_cv_objcopy_weaken = yes)
 
-case $host_os in
-  *mingw*)
-    # Disabling fast install keeps libtool from creating wrapper scripts
-    # around the executables it builds.  Such scripts have caused failures on
-    # MinGW.  Using this option means an extra link step is executed during
-    # "make install".
-    AC_DISABLE_FAST_INSTALL
-    ;;
-   *)
-    AC_ENABLE_FAST_INSTALL
-    ;;
-esac
-
-AC_PROG_LIBTOOL
-AC_SUBST(LIBTOOL_DEPS)
-AM_CONDITIONAL(USE_LIBTOOL, test "x$LIBTOOL" != "x")
+LT_INIT([])
 
 AC_C_INLINE
 AX_C___ATTRIBUTE__
@@ -128,6 +113,7 @@ AC_CHECK_TYPES([struct mallinfo],,, [#include <malloc.h>])
 AC_CHECK_TYPES([Elf32_Versym],,, [#include <elf.h>])   # for vdso_support.h
 AC_CHECK_FUNCS(sbrk)            # for tcmalloc to get memory
 AC_CHECK_FUNCS(geteuid)         # for turning off services when run as root
+AC_CHECK_FUNCS(fork)            # for the pthread_atfork setup
 AC_CHECK_HEADERS(features.h)    # for vdso_support.h
 AC_CHECK_HEADERS(malloc.h)      # some systems define stuff there, others not
 AC_CHECK_HEADERS(sys/malloc.h)  # where some versions of OS X put malloc.h
@@ -177,24 +163,32 @@ fi
 # This workaround comes from
 #    http://cygwin.com/ml/cygwin/2004-11/msg00138.html
 case "$host" in
+  *-*-mingw*)
+               dnl mingw doesn't have mmap, not worth
+               dnl checking. Especially given that mingw can be a
+               dnl cross-compiler
+               ;;
   *-*-cygwin*)
 	       ac_cv_func_mmap_fixed_mapped=yes
                AC_DEFINE(HAVE_MMAP, 1,
                          [Define to 1 if you have a working `mmap' system call.])
                ;;
-            *) AC_FUNC_MMAP
+            *) if test "$cross_compiling" = yes; then
+                 ac_cv_func_mmap_fixed_mapped=yes
+                 AC_DEFINE(HAVE_MMAP, 1,
+                           [Define to 1 if you have a working `mmap' system call.])
+               else
+                 AC_FUNC_MMAP
+               fi
                ;;
 esac
 
 # If AtomicWord != Atomic32, we need to define two versions of all the
 # atomicops functions.  If they're the same, we want to define only one.
 AC_MSG_CHECKING([if int32_t is the same type as intptr_t])
-AC_TRY_COMPILE([#include <stdint.h>],
-	       [int32_t v1 = 0; intptr_t v2 = 0; return (&v1 - &v2)],
-               [AC_DEFINE(INT32_EQUALS_INTPTR, 1,
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdint.h>]], [[int32_t v1 = 0; intptr_t v2 = 0; return (&v1 - &v2)]])],[AC_DEFINE(INT32_EQUALS_INTPTR, 1,
                           Define to 1 if int32_t is equivalent to intptr_t)
-                AC_MSG_RESULT([yes])],
-               [AC_MSG_RESULT([no])])
+                AC_MSG_RESULT([yes])],[AC_MSG_RESULT([no])])
 
 # We want to access the "PC" (Program Counter) register from a struct
 # ucontext.  Every system has its own way of doing that.  We try all the
@@ -214,16 +208,14 @@ AM_CONDITIONAL(ENABLE_STATIC, test "$enable_static" = yes)
 AC_CHECK_LIB(unwind, backtrace, UNWIND_LIBS=-lunwind, UNWIND_LIBS=)
 AC_SUBST(UNWIND_LIBS)
 
-# On x86_64, instead of libunwind, we can choose to compile with frame-pointers
-# (This isn't needed on i386, where -fno-omit-frame-pointer is the default).
+# On x86_64, instead of libunwind, we can choose to compile with frame-pointers.
 AC_ARG_ENABLE(frame_pointers,
               AS_HELP_STRING([--enable-frame-pointers],
                              [On x86_64 systems, compile with -fno-omit-frame-pointer (see INSTALL)]),
 	      , enable_frame_pointers=no)
 AM_CONDITIONAL(ENABLE_FRAME_POINTERS, test "$enable_frame_pointers" = yes)
 
-# Some x86_64 systems do not insert frame pointers by default (all
-# i386 systems that I know of, do.  I don't know about non-x86 chips).
+# Some x86_64 systems do not insert frame pointers by default.
 # We want to see if the current system is one of those.
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM(, [return __x86_64__ == 1 ? 0 : 1])],
                   [is_x86_64=yes], [is_x86_64=no])
@@ -282,6 +274,14 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM(, [void *sp = __builtin_stack_pointer()])],
                 AC_MSG_RESULT([yes])],
                [AC_MSG_RESULT([no])])
 
+# Check for __builtin_expect()
+AC_MSG_CHECKING([for __builtin_expect()])
+AC_LINK_IFELSE([AC_LANG_PROGRAM(, return __builtin_expect(main != 0, 1))],
+               [AC_DEFINE(HAVE_BUILTIN_EXPECT, 1,
+                          Define to 1 if compiler supports __builtin_expect)
+                AC_MSG_RESULT([yes])],
+               [AC_MSG_RESULT([no])])
+
 # Check if __environ is available (for GetenvBeforeMain)
 AC_MSG_CHECKING([for __environ])
 AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <unistd.h>],
@@ -295,10 +295,18 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <unistd.h>],
 # Note, however, that our code tickles a bug in gcc < 4.1.2
 # involving TLS and -fPIC (which our libraries will use) on x86:
 #   http://gcc.gnu.org/ml/gcc-bugs/2006-09/msg02275.html
+#
+# And mingw also does compile __thread but resultant code actually
+# fails to work correctly at least in some not so ancient version:
+# http://mingw-users.1079350.n2.nabble.com/gcc-4-4-multi-threaded-exception-handling-amp-thread-specifier-not-working-td3440749.html
 AC_MSG_CHECKING([for __thread])
 AC_LINK_IFELSE([AC_LANG_PROGRAM([#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)) && ((__GNUC__ < 4) || (__GNUC__ == 4 && __GNUC_MINOR__ < 1) || (__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ < 2))
 #error gcc has this bug: http://gcc.gnu.org/ml/gcc-bugs/2006-09/msg02275.html
-#endif], [static __thread int p = 0])],
+#endif
+#if defined(__MINGW32__)
+#error mingw doesn't really support tls
+#endif
+], [static __thread int p = 0])],
                [AC_DEFINE(HAVE_TLS, 1,
                           Define to 1 if compiler supports __thread)
                 AC_MSG_RESULT([yes])],
@@ -345,6 +353,15 @@ AC_PROGRAM_INVOCATION_NAME
 
 # Make the install prefix available, to figure out where to look for pprof
 AC_INSTALL_PREFIX
+
+dnl only very recent mingw has sleep and nanosleep
+case "$host" in
+   *-mingw*)
+     AC_CHECK_DECLS([sleep], [], [], [#include <unistd.h>])
+     AC_CHECK_DECLS([nanosleep], [], [], [#include <time.h>])
+   ;;
+esac
+
 
 # For windows, this has a non-trivial value (__declspec(export)), but any
 # system that uses configure wants this to be the empty string.

@@ -91,7 +91,7 @@ environment variables.</p>
   <td><code>HEAP_PROFILE_ALLOCATION_INTERVAL</code></td>
   <td>default: 1073741824 (1 Gb)</td>
   <td>
-    Dump heap profiling information once every specified number of
+    Dump heap profiling information each time the specified number of
     bytes has been allocated by the program.
   </td>
 </tr>
@@ -102,6 +102,15 @@ environment variables.</p>
   <td>
     Dump heap profiling information whenever the high-water memory
     usage mark increases by the specified number of bytes.
+  </td>
+</tr>
+
+<tr valign=top>
+  <td><code>HEAP_PROFILE_TIME_INTERVAL</code></td>
+  <td>default: 104857600 (100 Mb)</td>
+  <td>
+    Dump heap profiling information each time the specified
+    number of seconds has elapsed.
   </td>
 </tr>
 
@@ -122,7 +131,7 @@ environment variables.</p>
 </tr>
 
 <tr valign=top>
-  <td><code>HEAP_PROFILE_MMAP_ONLY</code></td>
+  <td><code>HEAP_PROFILE_ONLY_MMAP</code></td>
   <td>default: false</td>
   <td>
     Only profile <code>mmap</code>, <code>mremap</code>, and <code>sbrk</code>
@@ -334,7 +343,7 @@ interactive mode.</p>
   <li> If the program linked in a library that was not compiled
        with enough symbolic information, all samples associated
        with the library may be charged to the last symbol found
-       in the program before the libary.  This will artificially
+       in the program before the library.  This will artificially
        inflate the count for that symbol.
 
   <li> If you run the program on one machine, and profile it on

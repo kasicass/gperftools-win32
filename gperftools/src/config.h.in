@@ -5,6 +5,9 @@
 #define GPERFTOOLS_CONFIG_H_
 
 
+/* Define to 1 if compiler supports __builtin_expect */
+#undef HAVE_BUILTIN_EXPECT
+
 /* Define to 1 if compiler supports __builtin_stack_pointer */
 #undef HAVE_BUILTIN_STACK_POINTER
 
@@ -22,6 +25,10 @@
    don't. */
 #undef HAVE_DECL_MEMALIGN
 
+/* Define to 1 if you have the declaration of `nanosleep', and to 0 if you
+   don't. */
+#undef HAVE_DECL_NANOSLEEP
+
 /* Define to 1 if you have the declaration of `posix_memalign', and to 0 if
    you don't. */
 #undef HAVE_DECL_POSIX_MEMALIGN
@@ -29,6 +36,10 @@
 /* Define to 1 if you have the declaration of `pvalloc', and to 0 if you
    don't. */
 #undef HAVE_DECL_PVALLOC
+
+/* Define to 1 if you have the declaration of `sleep', and to 0 if you don't.
+   */
+#undef HAVE_DECL_SLEEP
 
 /* Define to 1 if you have the declaration of `uname', and to 0 if you don't.
    */
@@ -52,6 +63,9 @@
 
 /* Define to 1 if you have the <features.h> header file. */
 #undef HAVE_FEATURES_H
+
+/* Define to 1 if you have the `fork' function. */
+#undef HAVE_FORK
 
 /* Define to 1 if you have the `geteuid' function. */
 #undef HAVE_GETEUID

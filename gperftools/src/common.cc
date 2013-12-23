@@ -30,11 +30,31 @@
 // ---
 // Author: Sanjay Ghemawat <opensource@google.com>
 
+#include <stdlib.h> // for getenv and strtol
 #include "config.h"
 #include "common.h"
 #include "system-alloc.h"
+#include "base/spinlock.h"
 
 namespace tcmalloc {
+
+// Define the maximum number of object per classe type to transfer between
+// thread and central caches.
+static int32 FLAGS_tcmalloc_transfer_num_objects;
+
+static const int32 kDefaultTransferNumObjecs = 32768;
+
+// The init function is provided to explicit initialize the variable value
+// from the env. var to avoid C++ global construction that might defer its
+// initialization after a malloc/new call.
+static inline void InitTCMallocTransferNumObjects()
+{
+  if (UNLIKELY(FLAGS_tcmalloc_transfer_num_objects == 0)) {
+    const char *envval = getenv("TCMALLOC_TRANSFER_NUM_OBJ");
+    FLAGS_tcmalloc_transfer_num_objects = !envval ? kDefaultTransferNumObjecs :
+      strtol(envval, NULL, 10);
+  }
+}
 
 // Note: the following only works for "n"s that fit in 32-bits, but
 // that is fine since we only use it for small sizes.
@@ -60,16 +80,16 @@ int AlignmentForSize(size_t size) {
   } else if (size >= 128) {
     // Space wasted due to alignment is at most 1/8, i.e., 12.5%.
     alignment = (1 << LgFloor(size)) / 8;
-  } else if (size >= 16) {
+  } else if (size >= kMinAlign) {
     // We need an alignment of at least 16 bytes to satisfy
     // requirements for some SSE types.
-    alignment = 16;
+    alignment = kMinAlign;
   }
   // Maximum alignment allowed is page size alignment.
   if (alignment > kPageSize) {
     alignment = kPageSize;
   }
-  CHECK_CONDITION(size < 16 || alignment >= 16);
+  CHECK_CONDITION(size < kMinAlign || alignment >= kMinAlign);
   CHECK_CONDITION((alignment & (alignment - 1)) == 0);
   return alignment;
 }
@@ -90,13 +110,16 @@ int SizeMap::NumMoveSize(size_t size) {
   // - We go to the central freelist too often and we have to acquire
   //   its lock each time.
   // This value strikes a balance between the constraints above.
-  if (num > 32) num = 32;
+  if (num > FLAGS_tcmalloc_transfer_num_objects)
+    num = FLAGS_tcmalloc_transfer_num_objects;
 
   return num;
 }
 
 // Initialize the mapping arrays
 void SizeMap::Init() {
+  InitTCMallocTransferNumObjects();
+
   // Do some sanity checking on add_amount[]/shift_amount[]/class_array[]
   if (ClassIndex(0) < 0) {
     Log(kCrash, __FILE__, __LINE__,
@@ -110,7 +133,7 @@ void SizeMap::Init() {
   // Compute the size classes we want to use
   int sc = 1;   // Next size class to assign
   int alignment = kAlignment;
-  CHECK_CONDITION(kAlignment <= 16);
+  CHECK_CONDITION(kAlignment <= kMinAlign);
   for (size_t size = kAlignment; size <= kMaxSize; size += alignment) {
     alignment = AlignmentForSize(size);
     CHECK_CONDITION((size % alignment) == 0);
@@ -189,12 +212,56 @@ void SizeMap::Init() {
 
 // Metadata allocator -- keeps stats about how many bytes allocated.
 static uint64_t metadata_system_bytes_ = 0;
+static const size_t kMetadataAllocChunkSize = 8*1024*1024;
+static const size_t kMetadataBigAllocThreshold = kMetadataAllocChunkSize / 8;
+// usually malloc uses larger alignments, but because metadata cannot
+// have and fancy simd types, aligning on pointer size seems fine
+static const size_t kMetadataAllignment = sizeof(void *);
+
+static char *metadata_chunk_alloc_;
+static size_t metadata_chunk_avail_;
+
+static SpinLock metadata_alloc_lock(SpinLock::LINKER_INITIALIZED);
+
 void* MetaDataAlloc(size_t bytes) {
-  void* result = TCMalloc_SystemAlloc(bytes, NULL);
-  if (result != NULL) {
-    metadata_system_bytes_ += bytes;
+  if (bytes >= kMetadataAllocChunkSize) {
+    void *rv = TCMalloc_SystemAlloc(bytes,
+                                    NULL, kMetadataAllignment);
+    if (rv != NULL) {
+      metadata_system_bytes_ += bytes;
+    }
+    return rv;
   }
-  return result;
+
+  SpinLockHolder h(&metadata_alloc_lock);
+
+  // the following works by essentially turning address to integer of
+  // log_2 kMetadataAllignment size and negating it. I.e. negated
+  // value + original value gets 0 and that's what we want modulo
+  // kMetadataAllignment. Note, we negate before masking higher bits
+  // off, otherwise we'd have to mask them off after negation anyways.
+  intptr_t alignment = -reinterpret_cast<intptr_t>(metadata_chunk_alloc_) & (kMetadataAllignment-1);
+
+  if (metadata_chunk_avail_ < bytes + alignment) {
+    size_t real_size;
+    void *ptr = TCMalloc_SystemAlloc(kMetadataAllocChunkSize,
+                                     &real_size, kMetadataAllignment);
+    if (ptr == NULL) {
+      return NULL;
+    }
+
+    metadata_chunk_alloc_ = static_cast<char *>(ptr);
+    metadata_chunk_avail_ = real_size;
+
+    alignment = 0;
+  }
+
+  void *rv = static_cast<void *>(metadata_chunk_alloc_ + alignment);
+  bytes += alignment;
+  metadata_chunk_alloc_ += bytes;
+  metadata_chunk_avail_ -= bytes;
+  metadata_system_bytes_ += bytes;
+  return rv;
 }
 
 uint64_t metadata_system_bytes() { return metadata_system_bytes_; }

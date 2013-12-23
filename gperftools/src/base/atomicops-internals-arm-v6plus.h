@@ -94,6 +94,28 @@ inline Atomic32 NoBarrier_AtomicExchange(volatile Atomic32* ptr,
   return old;
 }
 
+inline void MemoryBarrier() {
+#if defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6Z__) || defined(__ARM_ARCH_6KZ__) || defined(__ARM_ARCH_6T2__)
+  uint32_t dest = 0;
+  __asm__ __volatile__("mcr p15,0,%0,c7,c10,5" :"=&r"(dest) : : "memory");
+#else
+  __asm__ __volatile__("dmb" : : : "memory");
+#endif
+}
+
+inline Atomic32 Acquire_AtomicExchange(volatile Atomic32* ptr,
+                                       Atomic32 new_value) {
+  Atomic32 old_value = NoBarrier_AtomicExchange(ptr, new_value);
+  MemoryBarrier();
+  return old_value;
+}
+
+inline Atomic32 Release_AtomicExchange(volatile Atomic32* ptr,
+                                       Atomic32 new_value) {
+  MemoryBarrier();
+  return NoBarrier_AtomicExchange(ptr, new_value);
+}
+
 inline Atomic32 NoBarrier_AtomicIncrement(volatile Atomic32* ptr,
                                           Atomic32 increment) {
   Atomic32 tmp, res;
@@ -108,10 +130,6 @@ inline Atomic32 NoBarrier_AtomicIncrement(volatile Atomic32* ptr,
       : "r" (ptr), "r"(increment)
       : "cc", "memory");
   return res;
-}
-
-inline void MemoryBarrier() {
-  __asm__ __volatile__("dmb" : : : "memory");
 }
 
 inline Atomic32 Barrier_AtomicIncrement(volatile Atomic32* ptr,
@@ -220,6 +238,19 @@ inline Atomic64 NoBarrier_AtomicExchange(volatile Atomic64* ptr,
   return old;
 }
 
+inline Atomic64 Acquire_AtomicExchange(volatile Atomic64* ptr,
+                                       Atomic64 new_value) {
+  Atomic64 old_value = NoBarrier_AtomicExchange(ptr, new_value);
+  MemoryBarrier();
+  return old_value;
+}
+
+inline Atomic64 Release_AtomicExchange(volatile Atomic64* ptr,
+                                       Atomic64 new_value) {
+  MemoryBarrier();
+  return NoBarrier_AtomicExchange(ptr, new_value);
+}
+
 inline Atomic64 NoBarrier_AtomicIncrement(volatile Atomic64* ptr,
                                           Atomic64 increment) {
   int store_failed;
@@ -300,6 +331,18 @@ inline Atomic64 NoBarrier_CompareAndSwap(volatile Atomic64* ptr,
 inline Atomic64 NoBarrier_AtomicExchange(volatile Atomic64* ptr,
                                          Atomic64 new_value) {
   NotImplementedFatalError("NoBarrier_AtomicExchange");
+  return 0;
+}
+
+inline Atomic64 Acquire_AtomicExchange(volatile Atomic64* ptr,
+                                       Atomic64 new_value) {
+  NotImplementedFatalError("Acquire_AtomicExchange");
+  return 0;
+}
+
+inline Atomic64 Release_AtomicExchange(volatile Atomic64* ptr,
+                                       Atomic64 new_value) {
+  NotImplementedFatalError("Release_AtomicExchange");
   return 0;
 }
 
