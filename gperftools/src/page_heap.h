@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2008, Google Inc.
 // All rights reserved.
 //
@@ -142,10 +143,12 @@ class PERFTOOLS_DLL_DECL PageHeap {
 
   // Page heap statistics
   struct Stats {
-    Stats() : system_bytes(0), free_bytes(0), unmapped_bytes(0) {}
+    Stats() : system_bytes(0), free_bytes(0), unmapped_bytes(0), committed_bytes(0) {}
     uint64_t system_bytes;    // Total bytes allocated from system
     uint64_t free_bytes;      // Total bytes on normal freelists
     uint64_t unmapped_bytes;  // Total bytes on returned freelists
+    uint64_t committed_bytes;  // Bytes committed, always <= system_bytes_.
+
   };
   inline Stats stats() const { return stats_; }
 
@@ -188,6 +191,11 @@ class PERFTOOLS_DLL_DECL PageHeap {
     return pagemap_cache_.GetOrDefault(p, 0);
   }
   void CacheSizeClass(PageID p, size_t cl) const { pagemap_cache_.Put(p, cl); }
+
+  bool GetAggressiveDecommit(void) {return aggressive_decommit_;}
+  void SetAggressiveDecommit(bool aggressive_decommit) {
+    aggressive_decommit_ = aggressive_decommit;
+  }
 
  private:
   // Allocates a big block of memory for the pagemap once we reach more than
@@ -263,6 +271,12 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // appropriate free list, and adjust stats.
   void MergeIntoFreeList(Span* span);
 
+  // Commit the span.
+  void CommitSpan(Span* span);
+
+  // Decommit the span.
+  bool DecommitSpan(Span* span);
+
   // Prepends span to appropriate free list, and adjusts stats.
   void PrependToFreeList(Span* span);
 
@@ -282,11 +296,15 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // some unused spans.
   bool EnsureLimit(Length n, bool allowRelease = true);
 
+  bool MayMergeSpans(Span *span, Span *other);
+
   // Number of pages to deallocate before doing more scavenging
   int64_t scavenge_counter_;
 
   // Index of last free list where we released memory to the OS.
   int release_index_;
+
+  bool aggressive_decommit_;
 };
 
 }  // namespace tcmalloc

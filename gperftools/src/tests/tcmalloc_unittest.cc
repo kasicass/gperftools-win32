@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 //
@@ -868,6 +869,23 @@ static size_t GetUnmappedBytes() {
 }
 #endif
 
+class AggressiveDecommitChanger {
+  size_t old_value_;
+public:
+  AggressiveDecommitChanger(size_t new_value) {
+    MallocExtension *inst = MallocExtension::instance();
+    bool rv = inst->GetNumericProperty("tcmalloc.aggressive_memory_decommit", &old_value_);
+    CHECK_CONDITION(rv);
+    rv = inst->SetNumericProperty("tcmalloc.aggressive_memory_decommit", new_value);
+    CHECK_CONDITION(rv);
+  }
+  ~AggressiveDecommitChanger() {
+    MallocExtension *inst = MallocExtension::instance();
+    bool rv = inst->SetNumericProperty("tcmalloc.aggressive_memory_decommit", old_value_);
+    CHECK_CONDITION(rv);
+  }
+};
+
 static void TestReleaseToSystem() {
   // Debug allocation mode adds overhead to each allocation which
   // messes up all the equality tests here.  I just disable the
@@ -878,6 +896,8 @@ static void TestReleaseToSystem() {
 
   const double old_tcmalloc_release_rate = FLAGS_tcmalloc_release_rate;
   FLAGS_tcmalloc_release_rate = 0;
+
+  AggressiveDecommitChanger disabler(0);
 
   static const int MB = 1048576;
   void* a = malloc(MB);
@@ -926,6 +946,51 @@ static void TestReleaseToSystem() {
   EXPECT_EQ(starting_bytes + 2*MB, GetUnmappedBytes());
 
   FLAGS_tcmalloc_release_rate = old_tcmalloc_release_rate;
+#endif   // #ifndef DEBUGALLOCATION
+}
+
+static void TestAggressiveDecommit() {
+  // Debug allocation mode adds overhead to each allocation which
+  // messes up all the equality tests here.  I just disable the
+  // teset in this mode.
+#ifndef DEBUGALLOCATION
+
+  if(!HaveSystemRelease) return;
+
+  fprintf(LOGSTREAM, "Testing aggressive de-commit\n");
+
+  AggressiveDecommitChanger enabler(1);
+
+  static const int MB = 1048576;
+  void* a = malloc(MB);
+  void* b = malloc(MB);
+
+  size_t starting_bytes = GetUnmappedBytes();
+
+  // ReleaseToSystem shouldn't do anything either.
+  MallocExtension::instance()->ReleaseToSystem(MB);
+  EXPECT_EQ(starting_bytes, GetUnmappedBytes());
+
+  free(a);
+
+  // The span to release should be 1MB.
+  EXPECT_EQ(starting_bytes + MB, GetUnmappedBytes());
+
+  free(b);
+
+  EXPECT_EQ(starting_bytes + 2*MB, GetUnmappedBytes());
+
+  // Nothing else to release.
+  MallocExtension::instance()->ReleaseFreeMemory();
+  EXPECT_EQ(starting_bytes + 2*MB, GetUnmappedBytes());
+
+  a = malloc(MB);
+  free(a);
+
+  EXPECT_EQ(starting_bytes + 2*MB, GetUnmappedBytes());
+
+  fprintf(LOGSTREAM, "Done testing aggressive de-commit\n");
+
 #endif   // #ifndef DEBUGALLOCATION
 }
 
@@ -1067,6 +1132,11 @@ static int RunAllTests(int argc, char** argv) {
     free(p1);
     VerifyDeleteHookWasCalled();
 
+    p1 = tc_malloc_skip_new_handler(10);
+    CHECK(p1 != NULL);
+    VerifyNewHookWasCalled();
+    free(p1);
+    VerifyDeleteHookWasCalled();
 
     p1 = calloc(10, 2);
     CHECK(p1 != NULL);
@@ -1307,6 +1377,7 @@ static int RunAllTests(int argc, char** argv) {
   TestHugeThreadCache();
   TestRanges();
   TestReleaseToSystem();
+  TestAggressiveDecommit();
   TestSetNewMode();
 
   return 0;

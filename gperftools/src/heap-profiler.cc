@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 // 
@@ -51,6 +52,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <sys/types.h>
+#include <signal.h>
 
 #include <algorithm>
 #include <string>
@@ -190,13 +192,14 @@ static char* DoGetHeapProfileLocked(char* buf, int buflen) {
   RAW_DCHECK(heap_lock.IsHeld(), "");
   int bytes_written = 0;
   if (is_on) {
-    if (FLAGS_mmap_profile) {
-      heap_profile->RefreshMMapData();
-    }
+    HeapProfileTable::Stats const stats = heap_profile->total();
+    (void)stats;   // avoid an unused-variable warning in non-debug mode.
     bytes_written = heap_profile->FillOrderedProfile(buf, buflen - 1);
-    if (FLAGS_mmap_profile) {
-      heap_profile->ClearMMapData();
-    }
+    // FillOrderedProfile should not reduce the set of active mmap-ed regions,
+    // hence MemoryRegionMap will let us remove everything we've added above:
+    RAW_DCHECK(stats.Equivalent(heap_profile->total()), "");
+    // if this fails, we somehow removed by FillOrderedProfile
+    // more than we have added.
   }
   buf[bytes_written] = '\0';
   RAW_DCHECK(bytes_written == strlen(buf), "");
@@ -336,13 +339,11 @@ static void RecordFree(const void* ptr) {
 
 // static
 void NewHook(const void* ptr, size_t size) {
-  if (dumping) return;
   if (ptr != NULL) RecordAlloc(ptr, size, 0);
 }
 
 // static
 void DeleteHook(const void* ptr) {
-  if (dumping) return;
   if (ptr != NULL) RecordFree(ptr);
 }
 
@@ -437,7 +438,8 @@ extern "C" void HeapProfilerStart(const char* prefix) {
   if (FLAGS_mmap_profile) {
     // Ask MemoryRegionMap to record all mmap, mremap, and sbrk
     // call stack traces of at least size kMaxStackDepth:
-    MemoryRegionMap::Init(HeapProfileTable::kMaxStackDepth);
+    MemoryRegionMap::Init(HeapProfileTable::kMaxStackDepth,
+                          /* use_buckets */ true);
   }
 
   if (FLAGS_mmap_log) {
@@ -457,7 +459,7 @@ extern "C" void HeapProfilerStart(const char* prefix) {
       reinterpret_cast<char*>(ProfilerMalloc(kProfileBufferSize));
 
   heap_profile = new(ProfilerMalloc(sizeof(HeapProfileTable)))
-                   HeapProfileTable(ProfilerMalloc, ProfilerFree);
+      HeapProfileTable(ProfilerMalloc, ProfilerFree, FLAGS_mmap_profile);
 
   last_dump_alloc = 0;
   last_dump_free = 0;
@@ -535,6 +537,20 @@ extern "C" void HeapProfilerDump(const char *reason) {
   }
 }
 
+// Signal handler that is registered when a user selectable signal
+// number is defined in the environment variable HEAPPROFILESIGNAL.
+static void HeapProfilerDumpSignal(int signal_number) {
+  (void)signal_number;
+  if (!heap_lock.TryLock()) {
+    return;
+  }
+  if (is_on && !dumping) {
+    DumpProfileLocked("signal");
+  }
+  heap_lock.Unlock();
+}
+
+
 //----------------------------------------------------------------------
 // Initialization/finalization code
 //----------------------------------------------------------------------
@@ -554,6 +570,19 @@ static void HeapProfilerInit() {
     return;
   }
 #endif
+
+  char *signal_number_str = getenv("HEAPPROFILESIGNAL");
+  if (signal_number_str != NULL) {
+    long int signal_number = strtol(signal_number_str, NULL, 10);
+    intptr_t old_signal_handler = reinterpret_cast<intptr_t>(signal(signal_number, HeapProfilerDumpSignal));
+    if (old_signal_handler == reinterpret_cast<intptr_t>(SIG_ERR)) {
+      RAW_LOG(FATAL, "Failed to set signal. Perhaps signal number %s is invalid\n", signal_number_str);
+    } else if (old_signal_handler == 0) {
+      RAW_LOG(INFO,"Using signal %d as heap profiling switch", signal_number);
+    } else {
+      RAW_LOG(FATAL, "Signal %d already in use\n", signal_number);
+    }
+  }
 
   HeapProfileTable::CleanupOldProfiles(fname);
 

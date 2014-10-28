@@ -17,6 +17,10 @@
 /* Define to 1 if you have the <cygwin/signal.h> header file. */
 #undef HAVE_CYGWIN_SIGNAL_H
 
+/* Define to 1 if you have the declaration of `backtrace', and to 0 if you
+   don't. */
+#undef HAVE_DECL_BACKTRACE
+
 /* Define to 1 if you have the declaration of `cfree', and to 0 if you don't.
    */
 #undef HAVE_DECL_CFREE
@@ -112,6 +116,10 @@
 /* Define if you have POSIX threads libraries and header files. */
 #undef HAVE_PTHREAD
 
+/* defined to 1 if pthread symbols are exposed even without include pthread.h
+   */
+#undef HAVE_PTHREAD_DESPITE_ASKING_FOR
+
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
 
@@ -205,9 +213,6 @@
 
 /* Define to 'volatile' if __malloc_hook is declared volatile */
 #undef MALLOC_HOOK_MAYBE_VOLATILE
-
-/* Define to 1 if your C compiler doesn't accept -c and -o together. */
-#undef NO_MINUS_C_MINUS_O
 
 /* Name of package */
 #undef PACKAGE

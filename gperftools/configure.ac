@@ -2,13 +2,13 @@
 ## In general, the safest way to proceed is to run ./autogen.sh
 
 # make sure we're interpreted by some minimal autoconf
-AC_PREREQ([2.68])
+AC_PREREQ([2.59])
 
-AC_INIT([gperftools],[2.1],[google-perftools@googlegroups.com])
+AC_INIT([gperftools],[2.2.1],[google-perftools@googlegroups.com])
 # Update this value for every release!  (A:B:C will map to foo.so.(A-C).C.B)
 # http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-TCMALLOC_SO_VERSION=5:2:1
-PROFILER_SO_VERSION=3:2:3
+TCMALLOC_SO_VERSION=6:2:2
+PROFILER_SO_VERSION=4:1:4
 
 AC_SUBST(TCMALLOC_SO_VERSION)
 AC_SUBST(PROFILER_SO_VERSION)
@@ -20,6 +20,8 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CANONICAL_HOST
 AM_INIT_AUTOMAKE([dist-zip])
 AC_CONFIG_HEADERS([src/config.h])
+
+AM_MAINTAINER_MODE()
 
 # Export the version information (for tc_version and friends)
 TC_VERSION_MAJOR=`expr "$PACKAGE_VERSION" : '\([[0-9]]*\)'`
@@ -79,6 +81,11 @@ if test "$enable_minimal" = yes; then
   enable_heap_profiler=no
   enable_heap_checker=no
 fi
+AC_ARG_ENABLE([stacktrace-via-backtrace],
+              [AS_HELP_STRING([--enable-stacktrace-via-backtrace],
+                              [enable use of backtrace() for stacktrace capturing (may deadlock)])],
+              [enable_backtrace=yes],
+              [])
 
 
 # Checks for programs.
@@ -99,7 +106,7 @@ AS_IF([test -n "$OBJCOPY"], [dnl
   [gpt_cv_objcopy_weaken=no])
 AM_CONDITIONAL(HAVE_OBJCOPY_WEAKEN, test $gpt_cv_objcopy_weaken = yes)
 
-LT_INIT([])
+AC_PROG_LIBTOOL
 
 AC_C_INLINE
 AX_C___ATTRIBUTE__
@@ -204,8 +211,9 @@ fi
 # Some tests test the behavior of .so files, and only make sense for dynamic.
 AM_CONDITIONAL(ENABLE_STATIC, test "$enable_static" = yes)
 
-# We want to link in libunwind if it exists
-AC_CHECK_LIB(unwind, backtrace, UNWIND_LIBS=-lunwind, UNWIND_LIBS=)
+# We want to link in libunwind or libexecinfo if it exists
+AC_CHECK_LIB(unwind, backtrace, UNWIND_LIBS=-lunwind,
+             [AC_CHECK_LIB(execinfo, backtrace, UNWIND_LIBS=-lexecinfo, UNWIND_LIBS=)])
 AC_SUBST(UNWIND_LIBS)
 
 # On x86_64, instead of libunwind, we can choose to compile with frame-pointers.
@@ -215,6 +223,7 @@ AC_ARG_ENABLE(frame_pointers,
 	      , enable_frame_pointers=no)
 AM_CONDITIONAL(ENABLE_FRAME_POINTERS, test "$enable_frame_pointers" = yes)
 
+AC_MSG_CHECKING([for x86 without frame pointers])
 # Some x86_64 systems do not insert frame pointers by default.
 # We want to see if the current system is one of those.
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM(, [return __x86_64__ == 1 ? 0 : 1])],
@@ -225,10 +234,14 @@ CFLAGS="$CFLAGS -S -O2 -o fp.s"
 # We do our own determination of success/failure in the grep, below.
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([int f(int x) {return x;}], [return f(0);])],
                   [:], [:])
+x86_no_fp_by_default=no
+AS_IF([test "$is_x86_64" = yes && ! grep 'mov.*rsp.*rbp' fp.s >/dev/null 2>&1], [x86_no_fp_by_default=yes])
 AM_CONDITIONAL(X86_64_AND_NO_FP_BY_DEFAULT,
-               test "$is_x86_64" = yes && ! grep 'mov.*rsp.*rbp' fp.s >/dev/null 2>&1)
+               test "$x86_no_fp_by_default" = yes)
 rm fp.s
 CFLAGS="$OLD_CFLAGS"
+AC_MSG_RESULT([$x86_no_fp_by_default])
+
 
 # We need to know if we're i386 so we can turn on -mmms, which is not
 # on by default for i386 (it is for x86_64).
@@ -299,12 +312,16 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <unistd.h>],
 # And mingw also does compile __thread but resultant code actually
 # fails to work correctly at least in some not so ancient version:
 # http://mingw-users.1079350.n2.nabble.com/gcc-4-4-multi-threaded-exception-handling-amp-thread-specifier-not-working-td3440749.html
+#
+# Also it was reported that earlier gcc versions for mips compile
+# __thread but it doesn't really work
 AC_MSG_CHECKING([for __thread])
-AC_LINK_IFELSE([AC_LANG_PROGRAM([#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)) && ((__GNUC__ < 4) || (__GNUC__ == 4 && __GNUC_MINOR__ < 1) || (__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ < 2))
+AC_LINK_IFELSE([AC_LANG_PROGRAM([#if defined(__GNUC__) && ((__GNUC__ < 4) || (__GNUC__ == 4 && __GNUC_MINOR__ < 1) || (__GNUC__ == 4 && __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ < 2))
 #error gcc has this bug: http://gcc.gnu.org/ml/gcc-bugs/2006-09/msg02275.html
-#endif
-#if defined(__MINGW32__)
-#error mingw doesn't really support tls
+#elif defined(__MINGW32__)
+#error mingw doesnt really support tls
+#elif defined(__APPLE__)
+#error OSX __thread support is known to call malloc which makes it unsafe to use from malloc replacement
 #endif
 ], [static __thread int p = 0])],
                [AC_DEFINE(HAVE_TLS, 1,
@@ -345,6 +362,26 @@ AC_CHECK_DECLS(uname,,, [#include <sys/utsname.h>])
 # In fact, a lot of the code in this directory depends on pthreads
 ACX_PTHREAD
 
+AC_LANG_SAVE
+AC_LANG_CPLUSPLUS
+AC_MSG_CHECKING([whether pthread symbols are available in C++ without including pthread.h])
+acx_pthread_despite_asking_for=no
+AC_LINK_IFELSE(
+  [AC_LANG_PROGRAM([
+      #include <string>
+      #include <vector>
+  ],[
+      pthread_t th; pthread_join(th, 0);
+  ])],[
+    acx_pthread_despite_asking_for=yes
+    AC_DEFINE(HAVE_PTHREAD_DESPITE_ASKING_FOR, 1, [defined to 1 if pthread symbols are exposed even without include pthread.h])
+    AC_DEFINE(HAVE_PTHREAD, 1, [])
+  ])
+AC_MSG_RESULT([$acx_pthread_despite_asking_for])
+AC_LANG_RESTORE
+
+AM_CONDITIONAL(HAVE_PTHREAD_DESPITE_ASKING_FOR, test x"$acx_pthread_despite_asking_for" = xyes)
+
 # Find out what namespace 'normal' STL code lives in
 AC_CXX_STL_NAMESPACE
 
@@ -362,6 +399,9 @@ case "$host" in
    ;;
 esac
 
+if test "x$enable_backtrace" = xyes; then
+  AC_CHECK_DECLS([backtrace], [], [], [#include <execinfo.h>])
+fi
 
 # For windows, this has a non-trivial value (__declspec(export)), but any
 # system that uses configure wants this to be the empty string.
@@ -436,3 +476,8 @@ AM_CONDITIONAL(WITH_STACK_TRACE, test "$enable_cpu_profiler" = yes -o \
 AC_CONFIG_FILES([Makefile
                  src/gperftools/tcmalloc.h src/windows/gperftools/tcmalloc.h])
 AC_OUTPUT
+
+AS_IF([test "$x86_no_fp_by_default" = yes && test "x$enable_frame_pointers" != xyes && test "x$UNWIND_LIBS" = x && test "x$enable_minimal" != xyes],
+      [AS_IF([test "x$enable_backtrace" = xyes],
+             [AC_MSG_WARN([No frame pointers and no libunwind. Expect backtrace capturing and unittests to fail])],
+             [AC_MSG_FAILURE([No frame pointers and no libunwind. The compilation will fail])])])

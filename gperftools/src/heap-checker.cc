@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 //
@@ -285,7 +286,7 @@ static const int heap_checker_info_level = 0;
 // Wrapper of LowLevelAlloc for STL_Allocator and direct use.
 // We always access this class under held heap_checker_lock,
 // this allows us to in particular protect the period when threads are stopped
-// at random spots with ListAllProcessThreads by heap_checker_lock,
+// at random spots with TCMalloc_ListAllProcessThreads by heap_checker_lock,
 // w/o worrying about the lock in LowLevelAlloc::Arena.
 // We rely on the fact that we use an own arena with an own lock here.
 class HeapLeakChecker::Allocator {
@@ -1043,7 +1044,7 @@ static enum {
     THREAD_REGS thread_regs;
 #define sys_ptrace(r, p, a, d)  syscall(SYS_ptrace, (r), (p), (a), (d))
     // We use sys_ptrace to avoid thread locking
-    // because this is called from ListAllProcessThreads
+    // because this is called from TCMalloc_ListAllProcessThreads
     // when all but this thread are suspended.
     if (sys_ptrace(PTRACE_GETREGS, thread_pids[i], NULL, &thread_regs) == 0) {
       // Need to use SP to get all the data from the very last stack frame:
@@ -1079,7 +1080,7 @@ static enum {
   // Do all other liveness walking while all threads are stopped:
   IgnoreNonThreadLiveObjectsLocked();
   // Can now resume the threads:
-  ResumeAllProcessThreads(num_threads, thread_pids);
+  TCMalloc_ResumeAllProcessThreads(num_threads, thread_pids);
   thread_listing_status = CALLBACK_COMPLETED;
   return failures;
 }
@@ -1237,7 +1238,7 @@ void HeapLeakChecker::IgnoreNonThreadLiveObjectsLocked() {
   }
 }
 
-// Callback for ListAllProcessThreads in IgnoreAllLiveObjectsLocked below
+// Callback for TCMalloc_ListAllProcessThreads in IgnoreAllLiveObjectsLocked below
 // to test/verify that we have just the one main thread, in which case
 // we can do everything in that main thread,
 // so that CPU profiler can collect all its samples.
@@ -1248,7 +1249,7 @@ static int IsOneThread(void* parameter, int num_threads,
     RAW_LOG(WARNING, "Have threads: Won't CPU-profile the bulk of leak "
                      "checking work happening in IgnoreLiveThreadsLocked!");
   }
-  ResumeAllProcessThreads(num_threads, thread_pids);
+  TCMalloc_ResumeAllProcessThreads(num_threads, thread_pids);
   return num_threads;
 }
 
@@ -1290,16 +1291,17 @@ void HeapLeakChecker::IgnoreAllLiveObjectsLocked(const void* self_stack_top) {
   if (FLAGS_heap_check_ignore_thread_live) {
     // In case we are doing CPU profiling we'd like to do all the work
     // in the main thread, not in the special thread created by
-    // ListAllProcessThreads, so that CPU profiler can collect all its samples.
-    // The machinery of ListAllProcessThreads conflicts with the CPU profiler
-    // by also relying on signals and ::sigaction.
-    // We can do this (run everything in the main thread) safely
-    // only if there's just the main thread itself in our process.
-    // This variable reflects these two conditions:
+    // TCMalloc_ListAllProcessThreads, so that CPU profiler can
+    // collect all its samples.  The machinery of
+    // TCMalloc_ListAllProcessThreads conflicts with the CPU profiler
+    // by also relying on signals and ::sigaction.  We can do this
+    // (run everything in the main thread) safely only if there's just
+    // the main thread itself in our process.  This variable reflects
+    // these two conditions:
     bool want_and_can_run_in_main_thread =
       ProfilingIsEnabledForAllThreads()  &&
-      ListAllProcessThreads(NULL, IsOneThread) == 1;
-    // When the normal path of ListAllProcessThreads below is taken,
+      TCMalloc_ListAllProcessThreads(NULL, IsOneThread) == 1;
+    // When the normal path of TCMalloc_ListAllProcessThreads below is taken,
     // we fully suspend the threads right here before any liveness checking
     // and keep them suspended for the whole time of liveness checking
     // inside of the IgnoreLiveThreadsLocked callback.
@@ -1308,7 +1310,7 @@ void HeapLeakChecker::IgnoreAllLiveObjectsLocked(const void* self_stack_top) {
     //  graph while we walk it).
     int r = want_and_can_run_in_main_thread
             ? IgnoreLiveThreadsLocked(NULL, 1, &self_thread_pid, dummy_ap)
-            : ListAllProcessThreads(NULL, IgnoreLiveThreadsLocked);
+            : TCMalloc_ListAllProcessThreads(NULL, IgnoreLiveThreadsLocked);
     need_to_ignore_non_thread_objects = r < 0;
     if (r < 0) {
       RAW_LOG(WARNING, "Thread finding failed with %d errno=%d", r, errno);
@@ -1651,8 +1653,13 @@ ssize_t HeapLeakChecker::ObjectsLeaked() const {
 // Save pid of main thread for using in naming dump files
 static int32 main_thread_pid = getpid();
 #ifdef HAVE_PROGRAM_INVOCATION_NAME
+#ifdef __UCLIBC__
+extern const char* program_invocation_name;
+extern const char* program_invocation_short_name;
+#else
 extern char* program_invocation_name;
 extern char* program_invocation_short_name;
+#endif
 static const char* invocation_name() { return program_invocation_short_name; }
 static string invocation_path() { return program_invocation_name; }
 #else
@@ -2206,13 +2213,14 @@ void HeapLeakChecker::BeforeConstructorsLocked() {
   RAW_CHECK(MallocHook::AddNewHook(&NewHook), "");
   RAW_CHECK(MallocHook::AddDeleteHook(&DeleteHook), "");
   constructor_heap_profiling = true;
-  MemoryRegionMap::Init(1);
+  MemoryRegionMap::Init(1, /* use_buckets */ false);
     // Set up MemoryRegionMap with (at least) one caller stack frame to record
     // (important that it's done before HeapProfileTable creation below).
   Allocator::Init();
   RAW_CHECK(heap_profile == NULL, "");
   heap_profile = new(Allocator::Allocate(sizeof(HeapProfileTable)))
-                   HeapProfileTable(&Allocator::Allocate, &Allocator::Free);
+      HeapProfileTable(&Allocator::Allocate, &Allocator::Free,
+                       /* profile_mmap */ false);
   RAW_VLOG(10, "Starting tracking the heap");
   heap_checker_on = true;
 }

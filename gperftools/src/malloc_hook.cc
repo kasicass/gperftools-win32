@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 // 
@@ -171,18 +172,6 @@ PtrT AtomicPtr<PtrT>::Exchange(PtrT new_val) {
           reinterpret_cast<AtomicWord>(new_val))));
   base::subtle::MemoryBarrier();  // And acquire semantics.
   return old_val;
-}
-
-template<typename PtrT>
-PtrT AtomicPtr<PtrT>::CompareAndSwap(PtrT old_val, PtrT new_val) {
-  base::subtle::MemoryBarrier();  // Release semantics.
-  PtrT retval = reinterpret_cast<PtrT>(static_cast<AtomicWord>(
-      base::subtle::NoBarrier_CompareAndSwap(
-          &data_,
-          reinterpret_cast<AtomicWord>(old_val),
-          reinterpret_cast<AtomicWord>(new_val))));
-  base::subtle::MemoryBarrier();  // And acquire semantics.
-  return retval;
 }
 
 AtomicPtr<MallocHook::NewHook>    new_hook_ = { 0 };

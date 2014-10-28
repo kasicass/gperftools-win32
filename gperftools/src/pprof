@@ -71,6 +71,7 @@
 use strict;
 use warnings;
 use Getopt::Long;
+use Cwd;
 
 my $PPROF_VERSION = "2.0";
 
@@ -1078,10 +1079,15 @@ sub TempName {
 # Print profile data in packed binary format (64-bit) to standard out
 sub PrintProfileData {
   my $profile = shift;
-
+  my $big_endian = pack("L", 1) eq pack("N", 1);
   # print header (64-bit style)
   # (zero) (header-size) (version) (sample-period) (zero)
-  print pack('L*', 0, 0, 3, 0, 0, 0, 1, 0, 0, 0);
+  if ($big_endian) {
+    print pack('L*', 0, 0, 0, 3, 0, 0, 0, 1, 0, 0);
+  }
+  else {
+    print pack('L*', 0, 0, 3, 0, 0, 0, 1, 0, 0, 0);
+  }
 
   foreach my $k (keys(%{$profile})) {
     my $count = $profile->{$k};
@@ -1090,8 +1096,14 @@ sub PrintProfileData {
       my $depth = $#addrs + 1;
       # int(foo / 2**32) is the only reliable way to get rid of bottom
       # 32 bits on both 32- and 64-bit systems.
-      print pack('L*', $count & 0xFFFFFFFF, int($count / 2**32));
-      print pack('L*', $depth & 0xFFFFFFFF, int($depth / 2**32));
+      if ($big_endian) {
+        print pack('L*', int($count / 2**32), $count & 0xFFFFFFFF);
+        print pack('L*', int($depth / 2**32), $depth & 0xFFFFFFFF);
+      }
+      else {
+        print pack('L*', $count & 0xFFFFFFFF, int($count / 2**32));
+        print pack('L*', $depth & 0xFFFFFFFF, int($depth / 2**32));
+      }
 
       foreach my $full_addr (@addrs) {
         my $addr = $full_addr;
@@ -1102,7 +1114,12 @@ sub PrintProfileData {
         }
         my $low_addr = substr($addr, -8);       # get last 8 hex chars
         my $high_addr = substr($addr, -16, 8);  # get up to 8 more hex chars
-        print pack('L*', hex('0x' . $low_addr), hex('0x' . $high_addr));
+        if ($big_endian) {
+          print pack('L*', hex('0x' . $high_addr), hex('0x' . $low_addr));
+        }
+        else {
+          print pack('L*', hex('0x' . $low_addr), hex('0x' . $high_addr));
+        }
       }
     }
   }
@@ -4326,7 +4343,7 @@ sub ParseTextSectionHeader {
 # Split /proc/pid/maps dump into a list of libraries
 sub ParseLibraries {
   return if $main::use_symbol_page;  # We don't need libraries info.
-  my $prog = shift;
+  my $prog = Cwd::abs_path(shift);
   my $map = shift;
   my $pcs = shift;
 
@@ -4359,6 +4376,16 @@ sub ParseLibraries {
       $finish = HexExtend($2);
       $offset = $zero_offset;
       $lib = $3;
+    } elsif (($l =~ /^($h)-($h)\s+..x.\s+($h)\s+\S+:\S+\s+\d+\s+(\S+)$/i) && ($4 eq $prog)) {
+      # PIEs and address space randomization do not play well with our
+      # default assumption that main executable is at lowest
+      # addresses. So we're detecting main executable in
+      # /proc/self/maps as well.
+      $start = HexExtend($1);
+      $finish = HexExtend($2);
+      $offset = HexExtend($3);
+      $lib = $4;
+      $lib =~ s|\\|/|g;     # turn windows-style paths into unix-style paths
     } else {
       next;
     }
@@ -4976,6 +5003,7 @@ sub error {
 sub GetProcedureBoundariesViaNm {
   my $escaped_nm_command = shift;    # shell-escaped
   my $regexp = shift;
+  my $image = shift;
 
   my $symbol_table = {};
   open(NM, "$escaped_nm_command |") || error("$escaped_nm_command: $!\n");
@@ -5045,6 +5073,37 @@ sub GetProcedureBoundariesViaNm {
     $symbol_table->{$routine} = [HexExtend($last_start),
                                  HexExtend($last_start)];
   }
+
+  # Verify if addr2line can find the $sep_symbol.  If not, we use objdump
+  # to find the address for the $sep_symbol on code section which addr2line
+  # can find.
+  if (defined($sep_address)){
+    my $start_val = $sep_address;
+    my $addr2line = $obj_tool_map{"addr2line"};
+    my $cmd = ShellEscape($addr2line, "-f", "-C", "-e", $image, "-i");
+    open(FINI, "echo $start_val | $cmd  |")
+         || error("echo $start_val | $cmd: $!\n");
+    $_ = <FINI>;
+    s/\r?\n$//g;
+    my $fini = $_;
+    close(FINI);
+    if ($fini ne $sep_symbol){
+      my $objdump =  $obj_tool_map{"objdump"};
+      $cmd = ShellEscape($objdump, "-d", $image);
+      my $grep = ShellEscape("grep", $sep_symbol);
+      my $tail = ShellEscape("tail", "-n", "1");
+      open(FINI, "$cmd | $grep | $tail |")
+           || error("$cmd | $grep | $tail: $!\n");
+      s/\r//g; # turn windows-looking lines into unix-looking lines
+      my $data = <FINI>;
+      if (defined($data)){
+        ($start_val, $fini) = split(/ </,$data);
+      }
+      close(FINI);
+    }
+    $sep_address = HexExtend($start_val);
+  }
+
   return $symbol_table;
 }
 
@@ -5124,7 +5183,7 @@ sub GetProcedureBoundaries {
   }
 
   foreach my $nm_command (@nm_commands) {
-    my $symbol_table = GetProcedureBoundariesViaNm($nm_command, $regexp);
+    my $symbol_table = GetProcedureBoundariesViaNm($nm_command, $regexp, $image);
     return $symbol_table if (%{$symbol_table});
   }
   my $symbol_table = {};

@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 // 
@@ -71,7 +72,7 @@ struct MallocRange;
 }
 
 // Interface to a pluggable system allocator.
-class SysAllocator {
+class PERFTOOLS_DLL_DECL SysAllocator {
  public:
   SysAllocator() {
   }

@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 /* Copyright (c) 2007, Google Inc.
  * All rights reserved.
  *
@@ -132,7 +133,14 @@ inline bool pthread_equal(pthread_t left, pthread_t right) {
   return left == right;
 }
 
+/*
+ * windows/port.h defines compatibility APIs for several .h files, which
+ * we therefore shouldn't be #including directly.  This hack keeps us from
+ * doing so.  TODO(csilvers): do something more principled.
+ */
+#define GOOGLE_MAYBE_THREADS_H_ 1
 /* This replaces maybe_threads.{h,cc} */
+
 EXTERN_C pthread_key_t PthreadKeyCreate(void (*destr_fn)(void*));  /* port.cc */
 
 inline int perftools_pthread_key_create(pthread_key_t *pkey,
@@ -164,11 +172,12 @@ EXTERN_C int perftools_pthread_once(pthread_once_t *once_control,
                                     void (*init_routine)(void));
 
 #endif  /* __cplusplus */
-#endif  /* HAVE_PTHREAD */
 
 inline void sched_yield(void) {
   Sleep(0);
 }
+
+#endif  /* HAVE_PTHREAD */
 
 /*
  * __declspec(thread) isn't usable in a dll opened via LoadLibrary().
@@ -447,6 +456,7 @@ inline int nanosleep(const struct timespec *req, struct timespec *rem) {
 #endif
 
 #ifndef __MINGW32__
+#if _MSC_VER < 1800
 inline long long int strtoll(const char *nptr, char **endptr, int base) {
     return _strtoi64(nptr, endptr, base);
 }
@@ -457,6 +467,7 @@ inline unsigned long long int strtoull(const char *nptr, char **endptr,
 inline long long int strtoq(const char *nptr, char **endptr, int base) {
     return _strtoi64(nptr, endptr, base);
 }
+#endif
 inline unsigned long long int strtouq(const char *nptr, char **endptr,
                                       int base) {
     return _strtoui64(nptr, endptr, base);
@@ -472,16 +483,6 @@ inline long long atoll(const char *nptr) {
 
 /* tcmalloc.cc calls this so we can patch VirtualAlloc() et al. */
 extern void PatchWindowsFunctions();
-
-// ----------------------------------- BUILD-SPECIFIC
-
-/*
- * windows/port.h defines compatibility APIs for several .h files, which
- * we therefore shouldn't be #including directly.  This hack keeps us from
- * doing so.  TODO(csilvers): do something more principled.
- */
-#define GOOGLE_MAYBE_THREADS_H_ 1
-
 
 #endif  /* _WIN32 */
 

@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2008, Google Inc.
 // All rights reserved.
 //
@@ -30,9 +31,13 @@
 // ---
 // Author: Ken Ashcraft <opensource@google.com>
 
+#include <config.h>
 #include "static_vars.h"
 #include <stddef.h>                     // for NULL
 #include <new>                          // for operator new
+#ifdef HAVE_PTHREAD
+#include <pthread.h>                    // for pthread_atfork
+#endif
 #include "internal_logging.h"  // for CHECK_CONDITION
 #include "common.h"
 #include "sampler.h"           // for Sampler
@@ -61,17 +66,6 @@ void CentralCacheUnlockAll()
   Static::pageheap_lock()->Unlock();
 }
 #endif
-
-static inline
-void SetupAtForkLocksHandler()
-{
-#if defined(HAVE_FORK) && defined(HAVE_PTHREAD)
-  pthread_atfork(CentralCacheLockAll,    // parent calls before fork
-                 CentralCacheUnlockAll,  // parent calls after fork
-                 CentralCacheUnlockAll); // child calls after fork
-#endif
-}
-
 
 SpinLock Static::pageheap_lock_(SpinLock::LINKER_INITIALIZED);
 SizeMap Static::sizemap_;
@@ -102,10 +96,23 @@ void Static::InitStaticVars() {
   // in is caches as pointers that are sources of heap object liveness,
   // which leads to it missing some memory leaks.
   pageheap_ = new (MetaDataAlloc(sizeof(PageHeap))) PageHeap;
+  pageheap_->SetAggressiveDecommit(EnvToBool("TCMALLOC_AGGRESSIVE_DECOMMIT", false));
   DLL_Init(&sampled_objects_);
   Sampler::InitStatics();
 }
 
+
+#if defined(HAVE_FORK) && defined(HAVE_PTHREAD)
+
+static inline
+void SetupAtForkLocksHandler()
+{
+  pthread_atfork(CentralCacheLockAll,    // parent calls before fork
+                 CentralCacheUnlockAll,  // parent calls after fork
+                 CentralCacheUnlockAll); // child calls after fork
+}
 REGISTER_MODULE_INITIALIZER(tcmalloc_fork_handler, SetupAtForkLocksHandler());
+
+#endif
 
 }  // namespace tcmalloc

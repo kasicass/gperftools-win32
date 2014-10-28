@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2008, Google Inc.
 // All rights reserved.
 // 
@@ -35,6 +36,7 @@
 #include "common.h"
 #include "system-alloc.h"
 #include "base/spinlock.h"
+#include "getenv_safe.h" // TCMallocGetenvSafe
 
 namespace tcmalloc {
 
@@ -49,14 +51,11 @@ static const int32 kDefaultTransferNumObjecs = 32768;
 // initialization after a malloc/new call.
 static inline void InitTCMallocTransferNumObjects()
 {
-  FLAGS_tcmalloc_transfer_num_objects = kDefaultTransferNumObjecs;
-#if 0
   if (UNLIKELY(FLAGS_tcmalloc_transfer_num_objects == 0)) {
-    const char *envval = getenv("TCMALLOC_TRANSFER_NUM_OBJ");
+    const char *envval = TCMallocGetenvSafe("TCMALLOC_TRANSFER_NUM_OBJ");
     FLAGS_tcmalloc_transfer_num_objects = !envval ? kDefaultTransferNumObjecs :
       strtol(envval, NULL, 10);
   }
-#endif
 }
 
 // Note: the following only works for "n"s that fit in 32-bits, but
@@ -124,7 +123,7 @@ void SizeMap::Init() {
   InitTCMallocTransferNumObjects();
 
   // Do some sanity checking on add_amount[]/shift_amount[]/class_array[]
-  if (ClassIndex(0) < 0) {
+  if (ClassIndex(0) != 0) {
     Log(kCrash, __FILE__, __LINE__,
         "Invalid class index for size 0", ClassIndex(0));
   }
@@ -190,7 +189,7 @@ void SizeMap::Init() {
   }
 
   // Double-check sizes just to be safe
-  for (size_t size = 0; size <= kMaxSize; size++) {
+  for (size_t size = 0; size <= kMaxSize;) {
     const int sc = SizeClass(size);
     if (sc <= 0 || sc >= kNumClasses) {
       Log(kCrash, __FILE__, __LINE__,
@@ -204,6 +203,11 @@ void SizeMap::Init() {
     if (size > s || s == 0) {
       Log(kCrash, __FILE__, __LINE__,
           "Bad (class, size, requested)", sc, s, size);
+    }
+    if (size <= kMaxSmallSize) {
+      size += 8;
+    } else {
+      size += 128;
     }
   }
 

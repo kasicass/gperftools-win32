@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2006, Google Inc.
 // All rights reserved.
 // 
@@ -164,6 +165,12 @@ const char* GetenvBeforeMain(const char* name) {
     p = endp + 1;
   }
   return NULL;                   // env var never found
+}
+
+extern "C" {
+  const char* TCMallocGetenvSafe(const char* name) {
+    return GetenvBeforeMain(name);
+  }
 }
 
 // This takes as an argument an environment-variable name (like

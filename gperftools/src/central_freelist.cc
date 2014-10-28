@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2008, Google Inc.
 // All rights reserved.
 //
@@ -257,52 +258,62 @@ int CentralFreeList::RemoveRange(void **start, void **end, int N) {
   }
 
   int result = 0;
-  void* head = NULL;
-  void* tail = NULL;
+  *start = NULL;
+  *end = NULL;
   // TODO: Prefetch multiple TCEntries?
-  tail = FetchFromSpansSafe();
-  if (tail != NULL) {
-    SLL_SetNext(tail, NULL);
-    head = tail;
-    result = 1;
+  result = FetchFromOneSpansSafe(N, start, end);
+  if (result != 0) {
     while (result < N) {
-      void *t = FetchFromSpans();
-      if (!t) break;
-      SLL_Push(&head, t);
-      result++;
+      int n;
+      void* head = NULL;
+      void* tail = NULL;
+      n = FetchFromOneSpans(N - result, &head, &tail);
+      if (!n) break;
+      result += n;
+      SLL_PushRange(start, head, tail);
     }
   }
   lock_.Unlock();
-  *start = head;
-  *end = tail;
   return result;
 }
 
 
-void* CentralFreeList::FetchFromSpansSafe() {
-  void *t = FetchFromSpans();
-  if (!t) {
+int CentralFreeList::FetchFromOneSpansSafe(int N, void **start, void **end) {
+  int result = FetchFromOneSpans(N, start, end);
+  if (!result) {
     Populate();
-    t = FetchFromSpans();
+    result = FetchFromOneSpans(N, start, end);
   }
-  return t;
+  return result;
 }
 
-void* CentralFreeList::FetchFromSpans() {
-  if (tcmalloc::DLL_IsEmpty(&nonempty_)) return NULL;
+int CentralFreeList::FetchFromOneSpans(int N, void **start, void **end) {
+  if (tcmalloc::DLL_IsEmpty(&nonempty_)) return 0;
   Span* span = nonempty_.next;
 
   ASSERT(span->objects != NULL);
-  span->refcount++;
-  void* result = span->objects;
-  span->objects = *(reinterpret_cast<void**>(result));
-  if (span->objects == NULL) {
+
+  int result = 0;
+  void *prev, *curr;
+  curr = span->objects;
+  do {
+    prev = curr;
+    curr = *(reinterpret_cast<void**>(curr));
+  } while (++result < N && curr != NULL);
+
+  if (curr == NULL) {
     // Move to empty list
     tcmalloc::DLL_Remove(span);
     tcmalloc::DLL_Prepend(&empty_, span);
     Event(span, 'E', 0);
   }
-  counter_--;
+
+  *start = span->objects;
+  *end = prev;
+  span->objects = curr;
+  SLL_SetNext(*end, NULL);
+  span->refcount += result;
+  counter_ -= result;
   return result;
 }
 

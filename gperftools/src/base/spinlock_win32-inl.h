@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 /* Copyright (c) 2009, Google Inc.
  * All rights reserved.
  * 
@@ -42,8 +43,7 @@ void SpinLockDelay(volatile Atomic32 *w, int32 value, int loop) {
   } else if (loop == 1) {
     Sleep(0);
   } else {
-    //Sleep(base::internal::SuggestedDelayNS(loop) / 1000000);
-    Sleep(1);
+    Sleep(base::internal::SuggestedDelayNS(loop) / 1000000);
   }
 }
 

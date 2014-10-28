@@ -1,4 +1,8 @@
-/* A manual version of config.h fit for windows machines. */
+/* A manual version of config.h fit for windows machines.
+ *
+ * Use of this source code is governed by a BSD-style license that can
+ * be found in the LICENSE file.
+ */
 
 /* Sometimes we accidentally #include this config.h instead of the one
    in .. -- this is particularly true for msys/mingw, which uses the
@@ -222,7 +226,7 @@
 #define PACKAGE_NAME "gperftools"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "gperftools 2.1"
+#define PACKAGE_STRING "gperftools 2.2.1"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "gperftools"
@@ -231,7 +235,7 @@
 #undef PACKAGE_URL
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "2.1"
+#define PACKAGE_VERSION "2.2.1"
 
 /* How to access the PC from a struct ucontext */
 #undef PC_FROM_UCONTEXT

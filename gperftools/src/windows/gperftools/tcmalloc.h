@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 /* Copyright (c) 2003, Google Inc.
  * All rights reserved.
  * 
@@ -49,9 +50,9 @@
 
 // Define the version number so folks can check against it
 #define TC_VERSION_MAJOR  2
-#define TC_VERSION_MINOR  1
-#define TC_VERSION_PATCH  ""
-#define TC_VERSION_STRING "gperftools 2.1"
+#define TC_VERSION_MINOR  2
+#define TC_VERSION_PATCH  ".1"
+#define TC_VERSION_STRING "gperftools 2.2.1"
 
 #include <stdlib.h>   // for struct mallinfo, if it's defined
 
@@ -78,6 +79,7 @@ extern "C" {
                                             const char** patch) __THROW;
 
   PERFTOOLS_DLL_DECL void* tc_malloc(size_t size) __THROW;
+  PERFTOOLS_DLL_DECL void* tc_malloc_skip_new_handler(size_t size) __THROW;
   PERFTOOLS_DLL_DECL void tc_free(void* ptr) __THROW;
   PERFTOOLS_DLL_DECL void* tc_realloc(void* ptr, size_t size) __THROW;
   PERFTOOLS_DLL_DECL void* tc_calloc(size_t nmemb, size_t size) __THROW;

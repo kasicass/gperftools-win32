@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 //
@@ -51,7 +52,7 @@
 
 // I test for 64-bit first so I don't have to do things like
 // '#if (defined(__mips__) && !defined(__MIPS64__))' as a mips32 check.
-#if defined(__x86_64__) || defined(__PPC64__) || (defined(_MIPS_SIM) && _MIPS_SIM == _ABI64)
+#if defined(__x86_64__) || defined(__PPC64__) || defined(__aarch64__) || (defined(_MIPS_SIM) && _MIPS_SIM == _ABI64)
 
 static inline void* do_mmap64(void *start, size_t length,
                               int prot, int flags,
@@ -201,6 +202,7 @@ extern "C" void* mremap(void* old_addr, size_t old_size, size_t new_size,
   return result;
 }
 
+#ifndef __UCLIBC__
 // libc's version:
 extern "C" void* __sbrk(ptrdiff_t increment);
 
@@ -210,6 +212,8 @@ extern "C" void* sbrk(ptrdiff_t increment) __THROW {
   MallocHook::InvokeSbrkHook(result, increment);
   return result;
 }
+
+#endif
 
 /*static*/void* MallocHook::UnhookedMMap(void *start, size_t length, int prot,
                                          int flags, int fd, off_t offset) {

@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 //
@@ -345,6 +346,11 @@ class AssignAttributeStartEnd {
 # elif (defined(__arm__))
 #   define CACHELINE_ALIGNED __attribute__((aligned(64)))
     // some ARMs have shorter cache lines (ARM1176JZF-S is 32 bytes for example) but obviously 64-byte aligned implies 32-byte aligned
+# elif (defined(__mips__))
+#   define CACHELINE_ALIGNED __attribute__((aligned(128)))
+# elif (defined(__aarch64__))
+#   define CACHELINE_ALIGNED __attribute__((aligned(64)))
+    // implementation specific, Cortex-A53 and 57 should have 64 bytes
 # else
 #   error Could not determine cache line length - unknown architecture
 # endif

@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 // 
@@ -201,8 +202,7 @@ static const char mmap_name[] = "MmapSysAllocator";
 
 void* SbrkSysAllocator::Alloc(size_t size, size_t *actual_size,
                               size_t alignment) {
-#ifndef HAVE_SBRK
-  failed_ = true;
+#if !defined(HAVE_SBRK) || defined(__UCLIBC__)
   return NULL;
 #else
   // Check if we should use sbrk allocation.
@@ -274,7 +274,6 @@ void* SbrkSysAllocator::Alloc(size_t size, size_t *actual_size,
 void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
                               size_t alignment) {
 #ifndef HAVE_MMAP
-  failed_ = true;
   return NULL;
 #else
   // Check if we should use mmap allocation.
@@ -343,7 +342,6 @@ void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
 void* DevMemSysAllocator::Alloc(size_t size, size_t *actual_size,
                                 size_t alignment) {
 #ifndef HAVE_MMAP
-  failed_ = true;
   return NULL;
 #else
   static bool initialized = false;
@@ -494,17 +492,17 @@ void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
   // Enforce minimum alignment
   if (alignment < sizeof(MemoryAligner)) alignment = sizeof(MemoryAligner);
 
+  size_t actual_size_storage;
+  if (actual_size == NULL) {
+    actual_size = &actual_size_storage;
+  }
+
   void* result = sys_alloc->Alloc(size, actual_size, alignment);
   if (result != NULL) {
-    if (actual_size) {
+    CHECK_CONDITION(
       CheckAddressBits<kAddressBits>(
-          reinterpret_cast<uintptr_t>(result) + *actual_size - 1);
-      TCMalloc_SystemTaken += *actual_size;
-    } else {
-      CheckAddressBits<kAddressBits>(
-          reinterpret_cast<uintptr_t>(result) + size - 1);
-      TCMalloc_SystemTaken += size;
-    }
+        reinterpret_cast<uintptr_t>(result) + *actual_size - 1));
+    TCMalloc_SystemTaken += *actual_size;
   }
   return result;
 }
@@ -545,4 +543,10 @@ bool TCMalloc_SystemRelease(void* start, size_t length) {
   }
 #endif
   return false;
+}
+
+void TCMalloc_SystemCommit(void* start, size_t length) {
+  // Nothing to do here.  TCMalloc_SystemRelease does not alter pages
+  // such that they need to be re-committed before they can be used by the
+  // application.
 }

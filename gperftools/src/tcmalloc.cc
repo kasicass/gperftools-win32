@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2005, Google Inc.
 // All rights reserved.
 //
@@ -699,6 +700,11 @@ class TCMallocImplementation : public MallocExtension {
       return true;
     }
 
+    if (strcmp(name, "tcmalloc.aggressive_memory_decommit") == 0) {
+      *value = size_t(Static::pageheap()->GetAggressiveDecommit());
+      return true;
+    }
+
     return false;
   }
 
@@ -708,6 +714,11 @@ class TCMallocImplementation : public MallocExtension {
     if (strcmp(name, "tcmalloc.max_total_thread_cache_bytes") == 0) {
       SpinLockHolder l(Static::pageheap_lock());
       ThreadCache::set_overall_thread_cache_size(value);
+      return true;
+    }
+
+    if (strcmp(name, "tcmalloc.aggressive_memory_decommit") == 0) {
+      Static::pageheap()->SetAggressiveDecommit(value != 0);
       return true;
     }
 
@@ -926,7 +937,11 @@ TCMallocGuard::TCMallocGuard() {
 
 TCMallocGuard::~TCMallocGuard() {
   if (--tcmallocguard_refcount == 0) {
-    const char* env = getenv("MALLOCSTATS");
+    const char* env = NULL;
+    if (!RunningOnValgrind()) {
+      // Valgrind uses it's own malloc so we cannot do MALLOCSTATS
+      env = getenv("MALLOCSTATS");
+    }
     if (env != NULL) {
       int level = atoi(env);
       if (level < 1) level = 1;
@@ -1718,6 +1733,12 @@ extern "C" PERFTOOLS_DLL_DECL struct mallinfo tc_mallinfo(void) __THROW {
 
 extern "C" PERFTOOLS_DLL_DECL size_t tc_malloc_size(void* ptr) __THROW {
   return MallocExtension::instance()->GetAllocatedSize(ptr);
+}
+
+extern "C" PERFTOOLS_DLL_DECL void* tc_malloc_skip_new_handler(size_t size)  __THROW {
+  void* result = do_malloc(size);
+  MallocHook::InvokeNewHook(result, size);
+  return result;
 }
 
 #endif  // TCMALLOC_USING_DEBUGALLOCATION

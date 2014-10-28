@@ -1,3 +1,4 @@
+// -*- Mode: C++; c-basic-offset: 2; indent-tabs-mode: nil -*-
 // Copyright (c) 2000, Google Inc.
 // All rights reserved.
 //
@@ -75,6 +76,11 @@
 #include "malloc_hook-inl.h"
 #include "symbolize.h"
 
+// NOTE: due to #define below, tcmalloc.cc will omit tc_XXX
+// definitions. So that debug implementations can be defined
+// instead. We're going to use do_malloc, do_free and other do_XXX
+// functions that are defined in tcmalloc.cc for actual memory
+// management
 #define TCMALLOC_USING_DEBUGALLOCATION
 #include "tcmalloc.cc"
 
@@ -140,16 +146,11 @@ extern "C" int pthread_once(pthread_once_t *, void (*)(void))
 static void TracePrintf(int fd, const char *fmt, ...)
   __attribute__ ((__format__ (__printf__, 2, 3)));
 
-// The do_* functions are defined in tcmalloc/tcmalloc.cc,
-// which is included before this file
-// when TCMALLOC_FOR_DEBUGALLOCATION is defined
-// TODO(csilvers): get rid of these now that we are tied to tcmalloc.
-#define BASE_MALLOC_NEW    do_malloc
-#define BASE_MALLOC        do_malloc
-#define BASE_FREE          do_free
-#define BASE_MALLOC_STATS  do_malloc_stats
-#define BASE_MALLOPT       do_mallopt
-#define BASE_MALLINFO      do_mallinfo
+// Round "value" up to next "alignment" boundary.
+// Requires that "alignment" be a power of two.
+static intptr_t RoundUp(intptr_t value, intptr_t alignment) {
+  return (value + alignment - 1) & ~(alignment - 1);
+}
 
 // ========================================================================= //
 
@@ -268,7 +269,7 @@ class MallocBlock {
   // setting the environment variable MALLOC_CHECK_ to 1 before you
   // start the program (see man malloc).
 
-  // We use either BASE_MALLOC or mmap to make the actual allocation. In
+  // We use either do_malloc or mmap to make the actual allocation. In
   // order to remember which one of the two was used for any block, we store an
   // appropriate magic word next to the block.
   static const int kMagicMalloc = 0xDEADBEEF;
@@ -285,7 +286,7 @@ class MallocBlock {
                     // should together occupy a multiple of 16 bytes. (At the
                     // moment, sizeof(size_t) == 4 or 8 depending on piii vs
                     // k8, and 4 of those sum to 16 or 32 bytes).
-                    // This, combined with BASE_MALLOC's alignment guarantees,
+                    // This, combined with do_malloc's alignment guarantees,
                     // ensures that SSE types can be stored into the returned
                     // block, at &size2_.
   size_t size1_;
@@ -348,8 +349,17 @@ class MallocBlock {
   static size_t real_malloced_size(size_t size) {
     return size + sizeof(MallocBlock);
   }
+
+  /*
+   * Here we assume size of page is kMinAlign aligned,
+   * so if size is MALLOC_ALIGNMENT aligned too, then we could
+   * guarantee return address is also kMinAlign aligned, because
+   * mmap return address at nearby page boundary on Linux.
+   */
   static size_t real_mmapped_size(size_t size) {
-    return size + MallocBlock::data_offset();
+    size_t tmp = size + MallocBlock::data_offset();
+    tmp = RoundUp(tmp, kMinAlign);
+    return tmp;
   }
 
   size_t real_size() {
@@ -375,8 +385,8 @@ class MallocBlock {
     // record us as allocated in the map
     alloc_map_lock_.Lock();
     if (!alloc_map_) {
-      void* p = BASE_MALLOC(sizeof(AllocMap));
-      alloc_map_ = new(p) AllocMap(BASE_MALLOC, BASE_FREE);
+      void* p = do_malloc(sizeof(AllocMap));
+      alloc_map_ = new(p) AllocMap(do_malloc, do_free);
     }
     alloc_map_->Insert(data_addr(), type);
     // initialize us
@@ -516,14 +526,10 @@ class MallocBlock {
       }
       b = (MallocBlock*) (p + (num_pages - 1) * pagesize - sz);
     } else {
-      b = (MallocBlock*) (type == kMallocType ?
-                          BASE_MALLOC(real_malloced_size(size)) :
-                          BASE_MALLOC_NEW(real_malloced_size(size)));
+      b = (MallocBlock*) do_malloc(real_malloced_size(size));
     }
 #else
-    b = (MallocBlock*) (type == kMallocType ?
-                        BASE_MALLOC(real_malloced_size(size)) :
-                        BASE_MALLOC_NEW(real_malloced_size(size)));
+    b = (MallocBlock*) do_malloc(real_malloced_size(size);
 #endif
 
     // It would be nice to output a diagnostic on allocation failure
@@ -603,7 +609,7 @@ class MallocBlock {
         free_queue_lock_.Unlock();
         for (int i = 0; i < num_entries; i++) {
           CheckForDanglingWrites(entries[i]);
-          BASE_FREE(entries[i].block);
+          do_free(entries[i].block);
         }
         num_entries = 0;
         free_queue_lock_.Lock();
@@ -613,7 +619,7 @@ class MallocBlock {
     free_queue_lock_.Unlock();
     for (int i = 0; i < num_entries; i++) {
       CheckForDanglingWrites(entries[i]);
-      BASE_FREE(entries[i].block);
+      do_free(entries[i].block);
     }
   }
 
@@ -729,14 +735,36 @@ class MallocBlock {
                      " deallocated; or else a word before the object has been"
                      " corrupted (memory stomping bug)", p);
     }
-    // If mb->offset_ is zero (common case), mb is the real header.  If
-    // mb->offset_ is non-zero, this block was allocated by memalign, and
-    // mb->offset_ is the distance backwards to the real header from mb,
-    // which is a fake header.  The following subtraction works for both zero
-    // and non-zero values.
-    return reinterpret_cast<MallocBlock *>(
-                reinterpret_cast<char *>(mb) - mb->offset_);
+    // If mb->offset_ is zero (common case), mb is the real header.
+    // If mb->offset_ is non-zero, this block was allocated by debug
+    // memallign implementation, and mb->offset_ is the distance
+    // backwards to the real header from mb, which is a fake header.
+    if (mb->offset_ == 0) {
+      return mb;
+    }
+
+    MallocBlock *main_block = reinterpret_cast<MallocBlock *>(
+      reinterpret_cast<char *>(mb) - mb->offset_);
+
+    if (main_block->offset_ != 0) {
+      RAW_LOG(FATAL, "memory corruption bug: offset_ field is corrupted."
+              " Need 0 but got %x",
+              (unsigned)(main_block->offset_));
+    }
+    if (main_block >= p) {
+      RAW_LOG(FATAL, "memory corruption bug: offset_ field is corrupted."
+              " Detected main_block address overflow: %x",
+              (unsigned)(mb->offset_));
+    }
+    if (main_block->size2_addr() < p) {
+      RAW_LOG(FATAL, "memory corruption bug: offset_ field is corrupted."
+              " It points below it's own main_block: %x",
+              (unsigned)(mb->offset_));
+    }
+
+    return main_block;
   }
+
   static const MallocBlock* FromRawPointer(const void* p) {
     // const-safe version: we just cast about
     return FromRawPointer(const_cast<void*>(p));
@@ -1053,11 +1081,36 @@ class DebugMallocImplementation : public TCMallocImplementation {
   }
 
   virtual MallocExtension::Ownership GetOwnership(const void* p) {
-    if (p) {
-      const MallocBlock* mb = MallocBlock::FromRawPointer(p);
-      return TCMallocImplementation::GetOwnership(mb);
+    if (!p) {
+      // nobody owns NULL
+      return MallocExtension::kNotOwned;
     }
-    return MallocExtension::kNotOwned;   // nobody owns NULL
+
+    // FIXME: note that correct GetOwnership should not touch memory
+    // that is not owned by tcmalloc. Main implementation is using
+    // pagemap to discover if page in question is owned by us or
+    // not. But pagemap only has marks for first and last page of
+    // spans.  Note that if p was returned out of our memalign with
+    // big alignment, then it will point outside of marked pages. Also
+    // note that FromRawPointer call below requires touching memory
+    // before pointer in order to handle memalign-ed chunks
+    // (offset_). This leaves us with two options:
+    //
+    // * do FromRawPointer first and have possibility of crashing if
+    //   we're given not owned pointer
+    //
+    // * return incorrect ownership for those large memalign chunks
+    //
+    // I've decided to choose later, which appears to happen rarer and
+    // therefore is arguably a lesser evil
+
+    MallocExtension::Ownership rv = TCMallocImplementation::GetOwnership(p);
+    if (rv != MallocExtension::kOwned) {
+      return rv;
+    }
+
+    const MallocBlock* mb = MallocBlock::FromRawPointer(p);
+    return TCMallocImplementation::GetOwnership(mb);
   }
 
   virtual void GetFreeListSizes(vector<MallocExtension::FreeListInfo>* v) {
@@ -1075,14 +1128,22 @@ class DebugMallocImplementation : public TCMallocImplementation {
 
  };
 
-static DebugMallocImplementation debug_malloc_implementation;
+static union {
+  char chars[sizeof(DebugMallocImplementation)];
+  void *ptr;
+} debug_malloc_implementation_space;
 
 REGISTER_MODULE_INITIALIZER(debugallocation, {
+#if (__cplusplus >= 201103L)
+    COMPILE_ASSERT(alignof(debug_malloc_implementation_space) >= alignof(DebugMallocImplementation),
+                   debug_malloc_implementation_space_is_not_properly_aligned);
+#endif
   // Either we or valgrind will control memory management.  We
   // register our extension if we're the winner. Otherwise let
   // Valgrind use its own malloc (so don't register our extension).
   if (!RunningOnValgrind()) {
-    MallocExtension::Register(&debug_malloc_implementation);
+    DebugMallocImplementation *impl = new (debug_malloc_implementation_space.chars) DebugMallocImplementation();
+    MallocExtension::Register(impl);
   }
 });
 
@@ -1202,8 +1263,18 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_realloc(void* ptr, size_t size) __THROW {
   // return null
   if (p == NULL)  return NULL;
 
-  memcpy(p->data_addr(), old->data_addr(),
-         (old->data_size() < size) ? old->data_size() : size);
+  // if ptr was allocated via memalign, then old->data_size() is not
+  // start of user data. So we must be careful to copy only user-data
+  char *old_begin = (char *)old->data_addr();
+  char *old_end = old_begin + old->data_size();
+
+  ssize_t old_ssize = old_end - (char *)ptr;
+  CHECK_CONDITION(old_ssize >= 0);
+
+  size_t old_size = (size_t)old_ssize;
+  CHECK_CONDITION(old_size <= old->data_size());
+
+  memcpy(p->data_addr(), ptr, (old_size < size) ? old_size : size);
   MallocHook::InvokeDeleteHook(ptr);
   MallocHook::InvokeNewHook(p->data_addr(), size);
   DebugDeallocate(ptr, MallocBlock::kMallocType);
@@ -1266,12 +1337,6 @@ extern "C" PERFTOOLS_DLL_DECL void tc_deletearray_nothrow(void* p, const std::no
   DebugDeallocate(p, MallocBlock::kArrayNewType);
 }
 
-// Round "value" up to next "alignment" boundary.
-// Requires that "alignment" be a power of two.
-static intptr_t RoundUp(intptr_t value, intptr_t alignment) {
-  return (value + alignment - 1) & ~(alignment - 1);
-}
-
 // This is mostly the same as do_memalign in tcmalloc.cc.
 static void *do_debug_memalign(size_t alignment, size_t size) {
   // Allocate >= size bytes aligned on "alignment" boundary
@@ -1297,6 +1362,9 @@ static void *do_debug_memalign(size_t alignment, size_t size) {
     // p is now end of fake header (beginning of client area),
     // and orig_p is the end of the real header, so offset_
     // is their difference.
+    //
+    // Note that other fields of fake_hdr are initialized with
+    // kMagicUninitializedByte
     fake_hdr->set_offset(reinterpret_cast<intptr_t>(p) - orig_p);
   }
   return p;
@@ -1402,19 +1470,25 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_pvalloc(size_t size) __THROW {
 
 // malloc_stats just falls through to the base implementation.
 extern "C" PERFTOOLS_DLL_DECL void tc_malloc_stats(void) __THROW {
-  BASE_MALLOC_STATS();
+  do_malloc_stats();
 }
 
 extern "C" PERFTOOLS_DLL_DECL int tc_mallopt(int cmd, int value) __THROW {
-  return BASE_MALLOPT(cmd, value);
+  return do_mallopt(cmd, value);
 }
 
 #ifdef HAVE_STRUCT_MALLINFO
 extern "C" PERFTOOLS_DLL_DECL struct mallinfo tc_mallinfo(void) __THROW {
-  return BASE_MALLINFO();
+  return do_mallinfo();
 }
 #endif
 
 extern "C" PERFTOOLS_DLL_DECL size_t tc_malloc_size(void* ptr) __THROW {
   return MallocExtension::instance()->GetAllocatedSize(ptr);
+}
+
+extern "C" PERFTOOLS_DLL_DECL void* tc_malloc_skip_new_handler(size_t size) __THROW {
+  void* result = DebugAllocate(size, MallocBlock::kMallocType);
+  MallocHook::InvokeNewHook(result, size);
+  return result;
 }
