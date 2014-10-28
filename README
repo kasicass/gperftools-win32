@@ -1,0 +1,2 @@
+gperftools-win32 features
+ * make heap-profiler runs in win32
