@@ -88,6 +88,7 @@
     <ClCompile Include="..\gperftools\src\windows\port.cc" />
     <ClCompile Include="..\gperftools\src\windows\preamble_patcher.cc" />
     <ClCompile Include="..\gperftools\src\windows\preamble_patcher_with_stub.cc" />
+    <ClCompile Include="..\gperftools\src\windows\system-alloc.cc" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D8D4BA1E-65B0-4828-B76D-B3ACD406C4F2}</ProjectGuid>

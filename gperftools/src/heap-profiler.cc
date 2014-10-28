@@ -339,11 +339,13 @@ static void RecordFree(const void* ptr) {
 
 // static
 void NewHook(const void* ptr, size_t size) {
+  if (dumping) return;
   if (ptr != NULL) RecordAlloc(ptr, size, 0);
 }
 
 // static
 void DeleteHook(const void* ptr) {
+  if (dumping) return;
   if (ptr != NULL) RecordFree(ptr);
 }
 
