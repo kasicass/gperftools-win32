@@ -36,6 +36,7 @@
     <ClInclude Include="..\gperftools\src\base\sysinfo.h" />
     <ClInclude Include="..\gperftools\src\central_freelist.h" />
     <ClInclude Include="..\gperftools\src\common.h" />
+    <ClInclude Include="..\gperftools\src\gperftools\heap-profiler.h" />
     <ClInclude Include="..\gperftools\src\heap-profile-table.h" />
     <ClInclude Include="..\gperftools\src\internal_logging.h" />
     <ClInclude Include="..\gperftools\src\malloc_hook-inl.h" />

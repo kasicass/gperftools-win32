@@ -74,6 +74,9 @@
     <ClInclude Include="..\gperftools\src\base\stl_allocator.h">
       <Filter>base</Filter>
     </ClInclude>
+    <ClInclude Include="..\gperftools\src\gperftools\heap-profiler.h">
+      <Filter>gperftools</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\gperftools\src\central_freelist.cc" />
@@ -142,6 +145,9 @@
     </Filter>
     <Filter Include="windows">
       <UniqueIdentifier>{11b3f478-4e37-4244-8a51-3bcf265e3c50}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="gperftools">
+      <UniqueIdentifier>{ee28b8d7-5447-4ee1-9dea-de618a93a34a}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
