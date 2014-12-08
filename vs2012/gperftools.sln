@@ -8,6 +8,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libtcmalloc-static-test", "
 		{D8D4BA1E-65B0-4828-B76D-B3ACD406C4F2} = {D8D4BA1E-65B0-4828-B76D-B3ACD406C4F2}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "addr2line-pdb", "addr2line-pdb.vcxproj", "{573B45A2-F464-44F9-9C28-280BC9437B96}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -32,6 +34,12 @@ Global
 		{D6BA0501-E6EC-4C53-81EB-4D90EA3BFDD1}.Release|Win32.Build.0 = Release|Win32
 		{D6BA0501-E6EC-4C53-81EB-4D90EA3BFDD1}.Release|x64.ActiveCfg = Release|x64
 		{D6BA0501-E6EC-4C53-81EB-4D90EA3BFDD1}.Release|x64.Build.0 = Release|x64
+		{573B45A2-F464-44F9-9C28-280BC9437B96}.Debug|Win32.ActiveCfg = Debug|Win32
+		{573B45A2-F464-44F9-9C28-280BC9437B96}.Debug|Win32.Build.0 = Debug|Win32
+		{573B45A2-F464-44F9-9C28-280BC9437B96}.Debug|x64.ActiveCfg = Debug|Win32
+		{573B45A2-F464-44F9-9C28-280BC9437B96}.Release|Win32.ActiveCfg = Release|Win32
+		{573B45A2-F464-44F9-9C28-280BC9437B96}.Release|Win32.Build.0 = Release|Win32
+		{573B45A2-F464-44F9-9C28-280BC9437B96}.Release|x64.ActiveCfg = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
