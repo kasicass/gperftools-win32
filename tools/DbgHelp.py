@@ -87,14 +87,16 @@ class IMAGEHLP_LINE64(Structure):
 PIMAGEHLP_LINE64 = POINTER(IMAGEHLP_LINE64)
 
 prototype = WINFUNCTYPE(BOOL, HANDLE, DWORD64, PDWORD, PIMAGEHLP_LINE64)
-paramflags = ((1, "hProcess"), (1, "dwAddr"), (2, "pdwDisplacement"), (2, "Line"))
-SymGetLineFromAddr64 = prototype(("SymGetLineFromAddr64", cdll.DbgHelp), paramflags)
-def SymGetLineFromAddr64_errcheck(result, func, args):
-	print args
-	if not result:
-		raise WinError()
-	return args[3].FileName, args[3].LineNumber
-SymGetLineFromAddr64.errcheck = SymGetLineFromAddr64_errcheck
+paramflags = ((1, "hProcess"), (1, "dwAddr"), (1, "pdwDisplacement"), (1, "Line"))
+SymGetLineFromAddr64_ = prototype(("SymGetLineFromAddr64", cdll.DbgHelp), paramflags)
+def SymGetLineFromAddr64(hProcess, dwAddr):
+	line = IMAGEHLP_LINE64()
+	line.SizeOfStruct = sizeof(line)
+	dummy = DWORD()
+	if SymGetLineFromAddr64_(hProcess, dwAddr, byref(dummy), byref(line)):
+		return line.FileName, line.LineNumber
+	else:
+		return "??", 0
 
 
 class MODLOAD_DATA(Structure):
@@ -119,24 +121,6 @@ SymLoadModuleEx.errcheck = SymLoadModuleEx_errcheck
 
 
 MAX_SYM_NAME = 2000
-class SYMBOL_INFO_SIZEOF(Structure):
-	_fields_ = [
-		("SizeOfStruct", ULONG),
-		("TypeIndex", ULONG),
-		("Reserved", ULONG64*2),
-		("Index", ULONG),
-		("Size", ULONG),
-		("ModBase", ULONG64),
-		("Flags", ULONG),
-		("Value", ULONG64),
-		("Address", ULONG64),
-		("Register", ULONG),
-		("Scope", ULONG),
-		("Tag", ULONG),
-		("NameLen", ULONG),
-		("MaxNameLen", ULONG),
-		("Name", CHAR),
-	]
 class SYMBOL_INFO(Structure):
 	_fields_ = [
 		("SizeOfStruct", ULONG),
@@ -153,7 +137,7 @@ class SYMBOL_INFO(Structure):
 		("Tag", ULONG),
 		("NameLen", ULONG),
 		("MaxNameLen", ULONG),
-		("Name", CHAR*MAX_SYM_NAME),
+		("Name", CHAR*MAX_SYM_NAME),  # http://msdn.microsoft.com/en-us/library/windows/desktop/ms681323(v=vs.85).aspx
 	]
 PSYMBOL_INFO = POINTER(SYMBOL_INFO)
 
@@ -161,9 +145,8 @@ prototype = WINFUNCTYPE(BOOL, HANDLE, DWORD64, PDWORD64, PSYMBOL_INFO)
 paramflags = ((1, "hProcess"), (1, "Address"), (1, "Displacement"), (1, "Symbol"))
 SymFromAddr_ = prototype(("SymFromAddr", cdll.DbgHelp), paramflags)
 def SymFromAddr(hProcess, Address):
-	symbol_sizeof = SYMBOL_INFO_SIZEOF()
 	symbol = SYMBOL_INFO()
-	symbol.SizeOfStruct = sizeof(symbol_sizeof)
+	symbol.SizeOfStruct = sizeof(symbol) - MAX_SYM_NAME # hack
 	symbol.MaxNameLen = MAX_SYM_NAME
 	dummy = ULONG64()
 	if not SymFromAddr_(hProcess, Address, byref(dummy), byref(symbol)):
