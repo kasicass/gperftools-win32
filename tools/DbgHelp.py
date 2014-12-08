@@ -76,6 +76,34 @@ paramflags = ((1, "SymOptions"), )
 SymSetOptions = prototype(("SymSetOptions", cdll.DbgHelp), paramflags)
 
 
+class MODLOAD_DATA(Structure):
+	_fields_ = [
+		("ssize", DWORD),
+		("ssig", DWORD),
+		("data", PVOID),
+		("size", DWORD),
+		("flags", DWORD)
+	]
+PMODLOAD_DATA = POINTER(MODLOAD_DATA)
+
+prototype = WINFUNCTYPE(DWORD64, HANDLE, HANDLE, LPSTR, LPSTR, DWORD64, DWORD, PMODLOAD_DATA, DWORD)
+paramflags = ((1, "hProcess"), (1, "hFile"), (1, "ImageName"), (1, "ModuleName"),
+	(1, "BaseOfDll"), (1, "DllSize"), (1, "Data"), (1, "Flags"))
+SymLoadModuleEx_ = prototype(("SymLoadModuleEx", cdll.DbgHelp), paramflags)
+def SymLoadModuleEx_errcheck(result, func, args):
+	if not result:
+		raise WinError()
+	return result
+SymLoadModuleEx_.errcheck = SymLoadModuleEx_errcheck
+def SymLoadModuleEx(hProcess, ImageName):
+	return SymLoadModuleEx_(hProcess, None, ImageName, None, 0, 0, None, 0)
+
+
+prototype = WINFUNCTYPE(BOOL, HANDLE, DWORD64)
+paramflags = ((1, "hProcess"), (1, "baseOfDll"))
+SymUnloadModule64 = prototype(("SymUnloadModule64", cdll.DbgHelp), paramflags)
+
+
 class IMAGEHLP_LINE64(Structure):
 	_fields_ = [
 		("SizeOfStruct", DWORD),
@@ -97,27 +125,6 @@ def SymGetLineFromAddr64(hProcess, dwAddr):
 		return line.FileName, line.LineNumber
 	else:
 		return "??", 0
-
-
-class MODLOAD_DATA(Structure):
-	_fields_ = [
-		("ssize", DWORD),
-		("ssig", DWORD),
-		("data", PVOID),
-		("size", DWORD),
-		("flags", DWORD)
-	]
-PMODLOAD_DATA = POINTER(MODLOAD_DATA)
-
-prototype = WINFUNCTYPE(DWORD64, HANDLE, HANDLE, LPSTR, LPSTR, DWORD64, DWORD, PMODLOAD_DATA, DWORD)
-paramflags = ((1, "hProcess"), (1, "hFile"), (1, "ImageName"), (1, "ModuleName"),
-	(1, "BaseOfDll"), (1, "DllSize"), (1, "Data"), (1, "Flags"))
-SymLoadModuleEx = prototype(("SymLoadModuleEx", cdll.DbgHelp), paramflags)
-def SymLoadModuleEx_errcheck(result, func, args):
-	if not result:
-		raise WinError()
-	return result
-SymLoadModuleEx.errcheck = SymLoadModuleEx_errcheck
 
 
 MAX_SYM_NAME = 2000
@@ -154,17 +161,19 @@ def SymFromAddr(hProcess, Address):
 	else:
 		return str(symbol.Name)
 
+
+
 if __name__ == '__main__':
-	hProcess = -1
+	hProcess = windll.kernel32.GetCurrentProcess()
 	print 'SymInitialize', SymInitialize(hProcess, None, False)
 	s = SymGetSearchPath(hProcess)
 	print 'SymSetSearchPath', SymSetSearchPath(hProcess, s + ";" + "SRV*c:\\websymbols*http://msdl.microsoft.com/download/symbols")
 	print 'set opt 0x%08x' % SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_DEBUG | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME)
-	moduleBase = SymLoadModuleEx(hProcess, None, r"D:\myprj\gperftools-win32\bin\Win32\Debug\libtcmalloc-static-test.exe",
-		None, 0, 0, None, 0)
+	moduleBase = SymLoadModuleEx(hProcess, r"D:\myprj\gperftools-win32\bin\Win32\Debug\libtcmalloc-static-test.exe")
 	print 'moduleBase: 0x%08x' % moduleBase
 	print SymGetLineFromAddr64(hProcess, 0x003ba3da - 0x002e0000 + moduleBase)
 	print SymGetLineFromAddr64(hProcess, 0x003682ea - 0x002e0000 + moduleBase)
 	print SymFromAddr(hProcess, 0x003682ea - 0x002e0000 + moduleBase)
+	print 'SymUnloadModule64', SymUnloadModule64(hProcess, moduleBase)
 	print 'SymCleanup', SymCleanup(hProcess)
 

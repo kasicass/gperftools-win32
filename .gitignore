@@ -20,3 +20,6 @@ vs2012/*.user
 
 # mac stuff
 .DS_Store
+
+# py
+*.pyc
