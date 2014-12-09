@@ -90,11 +90,11 @@ prototype = WINFUNCTYPE(DWORD64, HANDLE, HANDLE, LPSTR, LPSTR, DWORD64, DWORD, P
 paramflags = ((1, "hProcess"), (1, "hFile"), (1, "ImageName"), (1, "ModuleName"),
 	(1, "BaseOfDll"), (1, "DllSize"), (1, "Data"), (1, "Flags"))
 SymLoadModuleEx_ = prototype(("SymLoadModuleEx", cdll.DbgHelp), paramflags)
-def SymLoadModuleEx_errcheck(result, func, args):
-	if not result:
-		raise WinError()
-	return result
-SymLoadModuleEx_.errcheck = SymLoadModuleEx_errcheck
+#def SymLoadModuleEx_errcheck(result, func, args):
+#	if not result:
+#		raise WinError()
+#	return result
+#SymLoadModuleEx_.errcheck = SymLoadModuleEx_errcheck
 def SymLoadModuleEx(hProcess, ImageName):
 	return SymLoadModuleEx_(hProcess, None, ImageName, None, 0, 0, None, 0)
 
@@ -161,6 +161,8 @@ def SymFromAddr(hProcess, Address):
 	else:
 		return str(symbol.Name)
 
+def GetCurrentProcess():
+	return windll.kernel32.GetCurrentProcess()
 
 
 if __name__ == '__main__':

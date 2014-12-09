@@ -1,4 +1,3 @@
-import sys
 
 class HeapProfileParser(object):
 	def __init__(self):
@@ -51,6 +50,8 @@ class HeapProfileParser(object):
 		f.close()
 
 if __name__ == '__main__':
+	import sys
+
 	parser = HeapProfileParser()
 	parser.parseIt(sys.argv[1])
 
