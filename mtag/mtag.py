@@ -2,6 +2,7 @@
 import sys
 import math
 import os
+import cPickle
 
 from PyQt4.QtGui import *
 from PyQt4.QtCore import *
@@ -46,12 +47,34 @@ class StackNode(object):
 		self.tag = '<Remain>'
 		self.childs = []
 
+	def syncTag(self, other, outTags):
+		self.tag = other.tag
+		
+		if self.tag != '<Remain>':
+			outTags.add(self.tag)
+		
+		def get_childmap(node):
+			cmap = {}
+			for ch in node.childs:
+				cmap[(ch.funcName, ch.fileName, ch.lineNo)] = ch
+			return cmap
+		other_childmap = get_childmap(other)
+		
+		for ch in self.childs:
+			other_ch = other_childmap.get( (ch.funcName, ch.fileName, ch.lineNo), None )
+			if other_ch:
+				ch.syncTag(other_ch, outTags)
+
+
 class StackTree(object):
 	def __init__(self):
 		self.root = StackNode(None, '__root__', '??', 0, 0,0,0,0)
 
 	def clear(self):
 		self.root.clear()
+
+	def empty(self):
+		return self.root.childCount() == 0
 
 	def scanTag(self, node, tag, result):
 		if node.tag == tag:
@@ -80,6 +103,11 @@ class StackTree(object):
 			result[2] += child.sumCount
 			result[3] += child.sumBytes
 		return result
+
+	def syncTagsFrom(self, other):
+		tagList = set()
+		self.root.syncTag(other.root, tagList)
+		return list(tagList)
 
 class ComboEditor(QComboBox):
 	def __init__(self, parent, keydata):
@@ -188,6 +216,7 @@ class Main(QMainWindow, main_ui.Ui_MainWindow):
 		self.action_LoadHeap.triggered.connect(self._loadHeap)
 		self.action_SaveTag.triggered.connect(self._saveTag)
 		self.action_AddTag.triggered.connect(self._addTag)
+		self.action_LoadTag.triggered.connect(self._loadTag)
 
 		self.btnNewTag.clicked.connect(self._addTag)
 
@@ -197,6 +226,20 @@ class Main(QMainWindow, main_ui.Ui_MainWindow):
 		oldset.add(newtag)
 		self._tagList = list(oldset)
 		self._updateTable()
+
+	def _loadTag(self):
+		fileName = QFileDialog.getOpenFileName(self, u"打开tag文件", u"", u"Tag文件(*.tagfile)")
+		if fileName:
+			with open(fileName, 'r') as fp:
+				self.taggedStackTree = cPickle.loads(fp.read())
+				self._updateTags()
+
+	def _updateTags(self):
+		if self.stackTree.empty() or self.taggedStackTree.empty():
+			return
+		
+		self._tagList = self.stackTree.syncTagsFrom(self.taggedStackTree)
+		self._updateUI()
 
 	def _checkTag(self, key, tag):
 		curNode = self.root
@@ -208,7 +251,6 @@ class Main(QMainWindow, main_ui.Ui_MainWindow):
 
 
 	def _saveTag(self):
-		import cPickle
 		fileName = QFileDialog.getSaveFileName(self, u"保存tag文件", u"", u"Tag文件(*.tagfile)")
 		if fileName:
 			with open(fileName, 'w') as fp:
@@ -291,7 +333,7 @@ class Main(QMainWindow, main_ui.Ui_MainWindow):
 		newItem.setData(0, Qt.UserRole, QVariant(stacknode))		# save 
 		#newItem.setData(1, Qt.UserRole, self._tagList)	# tag
 
-		newItem.setText(1, '<Remain>')
+		newItem.setText(1, stacknode.tag)
 		newItem.setText(2, '%s, Line:%d'%(stacknode.fileName, stacknode.lineNo))	# code line
 		newItem.setText(3, str(stacknode.liveCount))
 		newItem.setText(4, str(stacknode.liveBytes))
