@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1062</width>
+    <height>819</height>
+   </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="2" column="0">
+     <widget class="QTableWidget" name="tableWidget">
+      <column>
+       <property name="text">
+        <string>Tag</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Live Count</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Live Bytes</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Sum Count</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Sum Bytes</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Percentage</string>
+       </property>
+      </column>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QTreeWidget" name="treeHeap">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>500</height>
+       </size>
+      </property>
+      <column>
+       <property name="text">
+        <string>函数名</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Tag</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>代码行</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Live Counts</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Live Bytes</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Sum Counts</string>
+       </property>
+      </column>
+      <column>
+       <property name="text">
+        <string>Sum Bytes</string>
+       </property>
+      </column>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QLineEdit" name="editTagName">
+        <property name="maximumSize">
+         <size>
+          <width>200</width>
+          <height>16777215</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnNewTag">
+        <property name="text">
+         <string>新建 Tag</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1062</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menu">
+    <property name="title">
+     <string>文件</string>
+    </property>
+    <addaction name="action_LoadHeap"/>
+    <addaction name="action_LoadTag"/>
+    <addaction name="action_SaveTag"/>
+    <addaction name="separator"/>
+    <addaction name="action_AddTag"/>
+   </widget>
+   <addaction name="menu"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="action_LoadHeap">
+   <property name="text">
+    <string>加载Heap文件...</string>
+   </property>
+  </action>
+  <action name="action_LoadTag">
+   <property name="text">
+    <string>加载Tag分类...</string>
+   </property>
+  </action>
+  <action name="action_SaveTag">
+   <property name="text">
+    <string>保存Tag分类...</string>
+   </property>
+  </action>
+  <action name="action_AddTag">
+   <property name="text">
+    <string>添加新Tag...</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
