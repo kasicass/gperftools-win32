@@ -19,10 +19,11 @@ class MtagApp(QApplication):
 
 
 class StackNode(object):
-	def __init__(self, parent, funcName, fileName, lineNo, liveCount, liveBytes, sumCount, sumBytes):
+	def __init__(self, parent, funcName, fileName, lineNo, libName, liveCount, liveBytes, sumCount, sumBytes):
 		self.funcName = funcName
 		self.fileName = fileName
 		self.lineNo = lineNo
+		self.libName = libName
 		self.liveCount = liveCount
 		self.liveBytes = liveBytes
 		self.sumCount = sumCount
@@ -68,7 +69,7 @@ class StackNode(object):
 
 class StackTree(object):
 	def __init__(self):
-		self.root = StackNode(None, '__root__', '??', 0, 0,0,0,0)
+		self.root = StackNode(None, '__root__', '??', 0, '??', 0,0,0,0)
 
 	def clear(self):
 		self.root.clear()
@@ -304,17 +305,17 @@ class Main(QMainWindow, main_ui.Ui_MainWindow):
 			curNode = self.stackTree.root
 			while True:
 				addr = stack[depth]
-				funcName, fileName, lineNo = self.addrTbl.addr2name(addr)
-				addrKey = (funcName, fileName, lineNo)
+				funcName, fileName, lineNo, libName = self.addrTbl.addr2name(addr)
+				addrKey = (funcName, fileName, lineNo, libName)
 				childCount = curNode.childCount()
 				nextNode = None
 				for i in xrange(childCount):
 					child = curNode.child(i)
-					userKey = (child.funcName, child.fileName, child.lineNo)
+					userKey = (child.funcName, child.fileName, child.lineNo, child.libName)
 					if userKey == addrKey:
 						nextNode = child
 				if not nextNode:
-					nextNode = StackNode(curNode, funcName, fileName, lineNo, liveCount, liveBytes, sumCount, sumBytes)
+					nextNode = StackNode(curNode, funcName, fileName, lineNo, libName, liveCount, liveBytes, sumCount, sumBytes)
 					curNode.append(nextNode)
 				else:
 					nextNode.liveCount += liveCount
@@ -334,7 +335,8 @@ class Main(QMainWindow, main_ui.Ui_MainWindow):
 		#newItem.setData(1, Qt.UserRole, self._tagList)	# tag
 
 		newItem.setText(1, stacknode.tag)
-		newItem.setText(2, '%s, Line:%d'%(stacknode.fileName, stacknode.lineNo))	# code line
+		moduleName = os.path.split(stacknode.libName)[1]
+		newItem.setText(2, '[%s]%s, Line:%d'%(moduleName, stacknode.fileName, stacknode.lineNo))	# code line
 		newItem.setText(3, str(stacknode.liveCount))
 		newItem.setText(4, str(stacknode.liveBytes))
 		newItem.setText(5, str(stacknode.sumCount))

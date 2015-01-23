@@ -28,21 +28,21 @@ class HeapProfileAddressTable(object):
 		for libName, (begin, addrList) in libDict.iteritems():
 			moduleBase = DbgHelp.SymLoadModuleEx(hProcess, libName)
 			if not moduleBase:
-				# print 'SymLoadModuleEx(%s) failed' % libName
+				print 'SymLoadModuleEx(%s) failed' % libName
 				continue
 
 			for addr in addrList:
 				realAddr     = addr - begin + moduleBase
 				source, line = DbgHelp.SymGetLineFromAddr64(hProcess, realAddr)
 				funcName     = DbgHelp.SymFromAddr(hProcess, realAddr)
-				self.addrDict[addr] = (funcName, source, line)
+				self.addrDict[addr] = (funcName, source, line, libName)
 
 			DbgHelp.SymUnloadModule64(hProcess, moduleBase)
 
 		DbgHelp.SymCleanup(hProcess)
 
 	def addr2name(self, addr):
-		return self.addrDict.get(addr, ('Unknown address (0x%08X)'%addr, '??', 0))
+		return self.addrDict.get(addr, ('Unknown address (0x%08X)'%addr, '??', 0, '??'))
 
 if __name__ == '__main__':
 	import sys
