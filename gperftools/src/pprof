@@ -72,6 +72,7 @@ use strict;
 use warnings;
 use Getopt::Long;
 use Cwd;
+use POSIX;
 
 my $PPROF_VERSION = "2.0";
 
@@ -140,6 +141,8 @@ my @prefix_list = ();
 my $sep_symbol = '_fini';
 my $sep_address = undef;
 
+my @stackTraces;
+
 ##### Argument parsing #####
 
 sub usage_string {
@@ -182,6 +185,7 @@ Options:
    --seconds=<n>       Length of time for dynamic profiles [default=30 secs]
    --add_lib=<file>    Read additional symbols and line info from the given library
    --lib_prefix=<dir>  Comma separated list of library path prefixes
+   --no_strip_temp     Do not strip template arguments from function names
 
 Reporting Granularity:
    --addresses         Report at address level
@@ -191,6 +195,7 @@ Reporting Granularity:
 
 Output type:
    --text              Generate text report
+   --stacks            Generate stack traces similar to the heap profiler (requires --text)
    --callgrind         Generate callgrind format to stdout
    --gv                Generate Postscript and display
    --evince            Generate PDF and display
@@ -230,6 +235,10 @@ Call-graph Options:
                        (i.e. direct leak generators) more visible
 
 Miscellaneous:
+   --no-auto-signal-frm Automatically drop 2nd frame that is always same (cpu-only)
+                       (assuming that it is artifact of bad stack captures
+                        which include signal handler frames)
+   --show_addresses    Always show addresses when applicable
    --tools=<prefix or binary:fullpath>[,...]   \$PATH for object tool pathnames
    --test              Run unit tests
    --help              This message
@@ -303,6 +312,8 @@ sub Init() {
 
   $main::opt_help = 0;
   $main::opt_version = 0;
+  $main::opt_show_addresses = 0;
+  $main::opt_no_auto_signal_frames = 0;
 
   $main::opt_cum = 0;
   $main::opt_base = '';
@@ -313,6 +324,7 @@ sub Init() {
   $main::opt_lib_prefix = "";
 
   $main::opt_text = 0;
+  $main::opt_stacks = 0;
   $main::opt_callgrind = 0;
   $main::opt_list = "";
   $main::opt_disasm = "";
@@ -354,6 +366,9 @@ sub Init() {
   $main::opt_debug   = 0;
   $main::opt_test    = 0;
 
+  # Do not strip template argument in function names
+  $main::opt_no_strip_temp = 0;
+
   # These are undocumented flags used only by unittests.
   $main::opt_test_stride = 0;
 
@@ -373,6 +388,8 @@ sub Init() {
 
   GetOptions("help!"          => \$main::opt_help,
              "version!"       => \$main::opt_version,
+             "show_addresses!"=> \$main::opt_show_addresses,
+             "no-auto-signal-frm!"=> \$main::opt_no_auto_signal_frames,
              "cum!"           => \$main::opt_cum,
              "base=s"         => \$main::opt_base,
              "seconds=i"      => \$main::opt_seconds,
@@ -383,6 +400,7 @@ sub Init() {
              "addresses!"     => \$main::opt_addresses,
              "files!"         => \$main::opt_files,
              "text!"          => \$main::opt_text,
+             "stacks!"        => \$main::opt_stacks,
              "callgrind!"     => \$main::opt_callgrind,
              "list=s"         => \$main::opt_list,
              "disasm=s"       => \$main::opt_disasm,
@@ -415,6 +433,7 @@ sub Init() {
              "contentions!"   => \$main::opt_contentions,
              "mean_delay!"    => \$main::opt_mean_delay,
              "tools=s"        => \$main::opt_tools,
+             "no_strip_temp!" => \$main::opt_no_strip_temp,
              "test!"          => \$main::opt_test,
              "debug!"         => \$main::opt_debug,
              # Undocumented flags used only by unittests:
@@ -504,6 +523,7 @@ sub Init() {
   # Remote profiling without a binary (using $SYMBOL_PAGE instead)
   if (@ARGV > 0) {
     if (IsProfileURL($ARGV[0])) {
+      printf STDERR "Using remote profile at $ARGV[0].\n";
       $main::use_symbol_page = 1;
     } elsif (IsSymbolizedProfileFile($ARGV[0])) {
       $main::use_symbolized_profile = 1;
@@ -658,6 +678,10 @@ sub Main() {
       if ($total != 0) {
         printf("Total: %s %s\n", Unparse($total), Units());
       }
+      if ($main::opt_stacks) {
+        printf("Stacks:\n\n");
+        PrintStacksForText($symbols, $profile);
+      }
       PrintText($symbols, $flat, $cumulative, -1);
     } elsif ($main::opt_raw) {
       PrintSymbolizedProfile($symbols, $profile, $main::prog);
@@ -745,6 +769,12 @@ sub RunWeb {
   if (`uname` =~ /Darwin/) {
     # OS X: open will use standard preference for SVG files.
     system("/usr/bin/open", $fname);
+    return;
+  }
+
+  if (`uname` =~ /MINGW/) {
+    # Windows(MinGW): open will use standard preference for SVG files.
+    system("cmd", "/c", "start", $fname);
     return;
   }
 
@@ -1174,6 +1204,25 @@ sub PrintText {
   my $flat = shift;
   my $cumulative = shift;
   my $line_limit = shift;
+
+  if ($main::opt_stacks && @stackTraces) {
+      foreach (sort { (split " ", $b)[1] <=> (split " ", $a)[1]; } @stackTraces) {
+	  print "$_\n" if $main::opt_debug;
+	  my ($n1, $s1, $n2, $s2, @addrs) = split;
+	  print "Leak of $s1 bytes in $n1 objects allocated from:\n";
+	  foreach my $pcstr (@addrs) {
+	      $pcstr =~ s/^0x//;
+	      my $sym;
+	      if (! defined $symbols->{$pcstr}) {
+		  $sym = "unknown";
+	      } else {
+		  $sym = "$symbols->{$pcstr}[0] $symbols->{$pcstr}[1]";
+	      }
+	      print "\t@ $pcstr $sym\n";
+	  }
+      }
+      print "\n";
+  }
 
   my $total = TotalProfile($flat);
 
@@ -2622,14 +2671,18 @@ sub TranslateStack {
       } elsif ($main::opt_lines) {
         if ($func eq '??' && $fileline eq '??:0') {
           push(@result, "$a");
-        } else {
+        } elsif (!$main::opt_show_addresses) {
           push(@result, "$func $fileline");
+        } else {
+          push(@result, "$func $fileline ($a)");
         }
       } elsif ($main::opt_functions) {
         if ($func eq '??') {
           push(@result, "$a");
-        } else {
+        } elsif (!$main::opt_show_addresses) {
           push(@result, $func);
+        } else {
+          push(@result, "$func ($a)");
         }
       } elsif ($main::opt_files) {
         if ($fileline eq '??:0' || $fileline eq '') {
@@ -2813,6 +2866,19 @@ sub ExtractCalls {
   return $calls;
 }
 
+sub PrintStacksForText {
+  my $symbols = shift;
+  my $profile = shift;
+
+  while (my ($stack_trace, $count) = each %$profile) {
+    my @address = split(/\n/, $stack_trace);
+    for (my $i = 0; $i <= $#address; $i++) {
+      $address[$i] = sprintf("(%s) %s", $address[$i], ExtractSymbolLocation($symbols, $address[$i]));
+    }
+    printf("%-8d %s\n\n", $count, join("\n         ", @address));
+  }
+}
+
 sub RemoveUninterestingFrames {
   my $symbols = shift;
   my $profile = shift;
@@ -2889,7 +2955,7 @@ sub RemoveUninterestingFrames {
                        'SpinLockHolder::~SpinLockHolder') {
       $skip{$vname} = 1;
     }
-  } elsif ($main::profile_type eq 'cpu') {
+  } elsif ($main::profile_type eq 'cpu' && !$main::opt_no_auto_signal_frames) {
     # Drop signal handlers used for CPU profile collection
     # TODO(dpeng): this should not be necessary; it's taken
     # care of by the general 2nd-pc mechanism below.
@@ -2918,11 +2984,22 @@ sub RemoveUninterestingFrames {
       if (exists($symbols->{$second_pc})) {
         $second_pc = $symbols->{$second_pc}->[0];
       }
+      if ($main::opt_no_auto_signal_frames) {
+        print STDERR "All second stack frames are same: `$second_pc'.\nMight be stack trace capturing bug.\n";
+        last;
+      }
       print STDERR "Removing $second_pc from all stack traces.\n";
       foreach my $k (keys(%{$profile})) {
         my $count = $profile->{$k};
         my @addrs = split(/\n/, $k);
+        my $topaddr = POSIX::strtoul($addrs[0], 16);
         splice @addrs, 1, 1;
+        if ($#addrs > 1) {
+          my $subtopaddr = POSIX::strtoul($addrs[1], 16);
+          if ($subtopaddr + 1 == $topaddr) {
+            splice @addrs, 1, 1;
+          }
+        }
         my $reduced_path = join("\n", @addrs);
         AddEntry($result, $reduced_path, $count);
       }
@@ -3873,7 +3950,7 @@ sub ReadCPUProfile {
 
   # Parse map
   my $map = '';
-  seek(PROFILE, $i * 4, 0);
+  seek(PROFILE, $i * ($address_length / 2), 0);
   read(PROFILE, $map, (stat PROFILE)[7]);
 
   my $r = {};
@@ -4059,7 +4136,9 @@ sub ReadHeapProfile {
       }
 
       my @counts = ($n1, $s1, $n2, $s2);
-      AddEntries($profile, $pcs, FixCallerAddresses($stack), $counts[$index]);
+      $stack = FixCallerAddresses($stack);
+      push @stackTraces, "$n1 $s1 $n2 $s2 $stack";
+      AddEntries($profile, $pcs, $stack, $counts[$index]);
     }
   }
 
@@ -4352,6 +4431,7 @@ sub ParseLibraries {
   my $zero_offset = HexExtend("0");
 
   my $buildvar = "";
+  my $priorlib = "";
   foreach my $l (split("\n", $map)) {
     if ($l =~ m/^\s*build=(.*)$/) {
       $buildvar = $1;
@@ -4361,7 +4441,7 @@ sub ParseLibraries {
     my $finish;
     my $offset;
     my $lib;
-    if ($l =~ /^($h)-($h)\s+..x.\s+($h)\s+\S+:\S+\s+\d+\s+(\S+\.(so|dll|dylib|bundle)((\.\d+)+\w*(\.\d+){0,3})?)$/i) {
+    if ($l =~ /^($h)-($h)\s+..x.\s+($h)\s+\S+:\S+\s+\d+\s+(.+\.(so|dll|dylib|bundle)((\.\d+)+\w*(\.\d+){0,3})?)$/i) {
       # Full line from /proc/self/maps.  Example:
       #   40000000-40015000 r-xp 00000000 03:01 12845071   /lib/ld-2.3.2.so
       $start = HexExtend($1);
@@ -4408,7 +4488,16 @@ sub ParseLibraries {
       }
     }
 
+    # If we find multiple executable segments for a single library, merge them
+    # into a single entry that spans the complete address range.
+    if ($lib eq $priorlib) {
+      my $prior = pop(@{$result});
+      $start = @$prior[1];
+      # TODO $offset may be wrong if .text is not in the final segment.
+    }
+
     push(@{$result}, [$lib, $start, $finish, $offset]);
+    $priorlib = $lib;
   }
 
   # Append special entry for additional library (not relocated)
@@ -4725,6 +4814,12 @@ sub MapToSymbols {
 
     $filelinenum =~ s|\\|/|g; # turn windows-style paths into unix-style paths
 
+    # Remove discriminator markers as this comes after the line number and
+    # confuses the rest of this script.
+    $filelinenum =~ s/ \(discriminator \d+\)$//;
+    # Convert unknown line numbers into line 0.
+    $filelinenum =~ s/:\?$/:0/;
+
     my $pcstr = $pclist->[$count];
     my $function = ShortFunctionName($fullfunction);
     my $nms = $nm_symbols->{$pcstr};
@@ -4818,7 +4913,10 @@ sub MapSymbolsWithNM {
 sub ShortFunctionName {
   my $function = shift;
   while ($function =~ s/\([^()]*\)(\s*const)?//g) { }   # Argument types
-  while ($function =~ s/<[^<>]*>//g)  { }    # Remove template arguments
+  $function =~ s/<[0-9a-f]*>$//g;                # Remove Address
+  if (!$main::opt_no_strip_temp) {
+      while ($function =~ s/<[^<>]*>//g)  { }   # Remove template arguments
+  }
   $function =~ s/^.*\s+(\w+::)/$1/;          # Remove leading type
   return $function;
 }

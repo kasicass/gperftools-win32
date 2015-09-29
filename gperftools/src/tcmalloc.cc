@@ -913,10 +913,6 @@ class TCMallocImplementation : public MallocExtension {
 static int tcmallocguard_refcount = 0;  // no lock needed: runs before main()
 TCMallocGuard::TCMallocGuard() {
   if (tcmallocguard_refcount++ == 0) {
-#ifdef HAVE_TLS    // this is true if the cc/ld/libc combo support TLS
-    // Check whether the kernel also supports TLS (needs to happen at runtime)
-    tcmalloc::CheckIfKernelSupportsTLS();
-#endif
     ReplaceSystemAlloc();    // defined in libc_override_*.h
     tc_free(tc_malloc(1));
     ThreadCache::InitTSD();
@@ -1095,7 +1091,7 @@ inline void* do_malloc_small(ThreadCache* heap, size_t size) {
   size_t cl = Static::sizemap()->SizeClass(size);
   size = Static::sizemap()->class_to_size(cl);
 
-  if ((FLAGS_tcmalloc_sample_parameter > 0) && heap->SampleAllocation(size)) {
+  if (UNLIKELY(FLAGS_tcmalloc_sample_parameter > 0) && heap->SampleAllocation(size)) {
     return DoSampledAllocation(size);
   } else {
     // The common case, and also the simplest.  This just pops the

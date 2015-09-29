@@ -4,11 +4,11 @@
 # make sure we're interpreted by some minimal autoconf
 AC_PREREQ([2.59])
 
-AC_INIT([gperftools],[2.2.1],[google-perftools@googlegroups.com])
+AC_INIT([gperftools],[2.4],[google-perftools@googlegroups.com])
 # Update this value for every release!  (A:B:C will map to foo.so.(A-C).C.B)
 # http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-TCMALLOC_SO_VERSION=6:2:2
-PROFILER_SO_VERSION=4:1:4
+TCMALLOC_SO_VERSION=6:6:2
+PROFILER_SO_VERSION=4:5:4
 
 AC_SUBST(TCMALLOC_SO_VERSION)
 AC_SUBST(PROFILER_SO_VERSION)
@@ -22,7 +22,6 @@ AM_INIT_AUTOMAKE([dist-zip])
 AC_CONFIG_HEADERS([src/config.h])
 
 AM_MAINTAINER_MODE()
-
 # Export the version information (for tc_version and friends)
 TC_VERSION_MAJOR=`expr "$PACKAGE_VERSION" : '\([[0-9]]*\)'`
 TC_VERSION_MINOR=`expr "$PACKAGE_VERSION" : '[[0-9]]*\.\([[0-9]]*\)'`
@@ -42,6 +41,7 @@ default_enable_heap_profiler=yes
 default_enable_heap_checker=yes
 default_enable_debugalloc=yes
 default_enable_minimal=no
+default_tcmalloc_alignment=16
 need_nanosleep=yes   # Used later, to decide if to run ACX_NANOSLEEP
 case "$host" in
    *-mingw*) default_enable_minimal=yes; default_enable_debugalloc=no;
@@ -50,6 +50,13 @@ case "$host" in
    *-freebsd*) default_enable_heap_checker=no;;
    *-darwin*) default_enable_heap_checker=no;;
 esac
+
+# Disable libunwind linking on ppc64 by default.
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM(, [return __PPC64__])],
+                  [default_enable_libunwind=no
+                   default_tcmalloc_pagesize=64],
+                  [default_enable_libunwind=yes
+                   default_tcmalloc_pagesize=8])
 
 AC_ARG_ENABLE([cpu-profiler],
               [AS_HELP_STRING([--disable-cpu-profiler],
@@ -86,7 +93,45 @@ AC_ARG_ENABLE([stacktrace-via-backtrace],
                               [enable use of backtrace() for stacktrace capturing (may deadlock)])],
               [enable_backtrace=yes],
               [])
+AC_ARG_ENABLE([libunwind],
+              [AS_HELP_STRING([--enable-libunwind],
+                              [enable libunwind linking])],
+              [],
+              [enable_libunwind="$default_enable_libunwind"])
+AC_ARG_WITH([tcmalloc-pagesize],
+            [AS_HELP_STRING([--with-tcmalloc-pagesize],
+                            [Set the tcmalloc internal page size to 8K, 32K or 64K])],
+            [],
+            [with_tcmalloc_pagesize=$default_tcmalloc_pagesize])
+AC_ARG_WITH([tcmalloc-alignment],
+            [AS_HELP_STRING([--with-tcmalloc-alignment],
+                            [Set the tcmalloc allocation alignment to 8 or 16 bytes])],
+            [],
+            [with_tcmalloc_alignment=$default_tcmalloc_alignment])
 
+case "$with_tcmalloc_pagesize" in
+  8)
+       #Default tcmalloc page size.
+       ;;
+  32)
+       AC_DEFINE(TCMALLOC_32K_PAGES, 1,
+                 [Define 32K of internal pages size for tcmalloc]);;
+  64)
+       AC_DEFINE(TCMALLOC_64K_PAGES, 1,
+                 [Define 64K of internal pages size for tcmalloc]);;
+  *)
+       AC_MSG_WARN([${with_tcmalloc_pagesize}K size not supported, using default tcmalloc page size.])
+esac
+case "$with_tcmalloc_alignment" in
+  8)
+       AC_DEFINE(TCMALLOC_ALIGN_8BYTES, 1,
+                 [Define 8 bytes of allocation alignment for tcmalloc]);;
+  16)
+       #Default tcmalloc allocation alignment.
+       ;;
+  *)
+       AC_MSG_WARN([${with_tcmalloc_alignment} bytes not supported, using default tcmalloc allocation alignment.])
+esac
 
 # Checks for programs.
 AC_PROG_CXX
@@ -127,7 +172,6 @@ AC_CHECK_HEADERS(sys/malloc.h)  # where some versions of OS X put malloc.h
 AC_CHECK_HEADERS(malloc/malloc.h)  # another place OS X puts malloc.h (?)
 AC_CHECK_HEADERS(glob.h)        # for heap-profile-table (cleaning up profiles)
 AC_CHECK_HEADERS(execinfo.h)    # for stacktrace? and heapchecker_unittest
-AC_CHECK_HEADERS(libunwind.h)   # for stacktrace
 AC_CHECK_HEADERS(unwind.h)      # for stacktrace
 AC_CHECK_HEADERS(sched.h)       # for being nice in our spinlock code
 AC_CHECK_HEADERS(conflict-signal.h)      # defined on some windows platforms?
@@ -211,10 +255,16 @@ fi
 # Some tests test the behavior of .so files, and only make sense for dynamic.
 AM_CONDITIONAL(ENABLE_STATIC, test "$enable_static" = yes)
 
-# We want to link in libunwind or libexecinfo if it exists
-AC_CHECK_LIB(unwind, backtrace, UNWIND_LIBS=-lunwind,
-             [AC_CHECK_LIB(execinfo, backtrace, UNWIND_LIBS=-lexecinfo, UNWIND_LIBS=)])
-AC_SUBST(UNWIND_LIBS)
+# We want to link in libunwind or libexecinfo if it it is enabled and exists.
+if test "$enable_libunwind" = yes; then
+  AC_CHECK_HEADERS(libunwind.h)   # for stacktrace
+  AC_CHECK_LIB(unwind, backtrace, UNWIND_LIBS=-lunwind,
+               [AC_CHECK_LIB(execinfo, backtrace, UNWIND_LIBS=-lexecinfo, UNWIND_LIBS=)])
+  AC_SUBST(UNWIND_LIBS)
+else
+  AC_CHECK_LIB(execinfo, backtrace, UNWIND_LIBS=-lexecinfo, UNWIND_LIBS=)
+  AC_SUBST(UNWIND_LIBS)
+fi
 
 # On x86_64, instead of libunwind, we can choose to compile with frame-pointers.
 AC_ARG_ENABLE(frame_pointers,
@@ -449,13 +499,6 @@ AH_BOTTOM([
 AM_CONDITIONAL(MINGW, expr $host : '.*-mingw' >/dev/null 2>&1)
 AM_CONDITIONAL(OSX, expr $host : '.*-apple-darwin.*' >/dev/null 2>&1)
 
-# Redhat 7 (and below?) has sys/ucontext.h, but if you try to #include
-# it directly, the compiler gets upset.  So we pretend we don't have
-# it.
-if cat /etc/redhat-release 2>/dev/null | grep "Red Hat Linux release 7" >/dev/null 2>&1; then
-AC_DEFINE(HAVE_SYS_UCONTEXT_H, 0, [<sys/ucontext.h> is broken on redhat 7])
-fi
-
 # Export the --enable flags we set above.  We do this at the end so
 # other configure rules can enable or disable targets based on what
 # they find.
@@ -471,6 +514,18 @@ AM_CONDITIONAL(WITH_HEAP_PROFILER_OR_CHECKER,
 AM_CONDITIONAL(WITH_STACK_TRACE, test "$enable_cpu_profiler" = yes -o \
                                       "$enable_heap_profiler" = yes -o \
                                       "$enable_heap_checker" = yes)
+
+have_linux_sigev_thread_id=no
+AC_MSG_CHECKING([for Linux SIGEV_THREAD_ID])
+AC_COMPILE_IFELSE(
+        [AC_LANG_PROGRAM([[#include <signal.h>
+                           #include <time.h>]],
+                         [[return SIGEV_THREAD_ID || CLOCK_THREAD_CPUTIME_ID || __linux;]])],
+        [AC_DEFINE(HAVE_LINUX_SIGEV_THREAD_ID, 1,
+                  [Define if this is Linux that has SIGEV_THREAD_ID])
+         have_linux_sigev_thread_id=yes
+         AC_MSG_RESULT([yes])],
+        [AC_MSG_RESULT([no])])
 
 # Write generated configuration file
 AC_CONFIG_FILES([Makefile

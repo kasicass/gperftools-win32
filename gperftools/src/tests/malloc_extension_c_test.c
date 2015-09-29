@@ -63,7 +63,8 @@ void TestDeleteHook(const void* ptr) {
 static
 void *forced_malloc(size_t size)
 {
-  void *rv = malloc(size);
+  extern void *tc_malloc(size_t);
+  void *rv = tc_malloc(size);
   if (!rv) {
     FAIL("malloc is not supposed to fail here");
   }
@@ -103,6 +104,28 @@ void TestMallocHook(void) {
   }
   if (!MallocHook_RemoveDeleteHook(&TestDeleteHook)) {
     FAIL("Failed to remove delete hook");
+  }
+
+  free(forced_malloc(10));
+  free(forced_malloc(20));
+  if (g_new_hook_calls != 2) {
+    FAIL("Wrong number of calls to the new hook");
+  }
+
+  MallocHook_SetNewHook(&TestNewHook);
+  MallocHook_SetDeleteHook(&TestDeleteHook);
+
+  free(forced_malloc(10));
+  free(forced_malloc(20));
+  if (g_new_hook_calls != 4) {
+    FAIL("Wrong number of calls to the singular new hook");
+  }
+
+  if (MallocHook_SetNewHook(NULL) == NULL) {
+    FAIL("Failed to set new hook");
+  }
+  if (MallocHook_SetDeleteHook(NULL) == NULL) {
+    FAIL("Failed to set delete hook");
   }
 }
 
