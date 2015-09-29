@@ -108,7 +108,7 @@ static const int kHashTableSize = 179999;   // Size for bucket_table_.
 // We strip out different number of stack frames in debug mode
 // because less inlining happens in that case
 #ifdef NDEBUG
-static const int kStripFrames = 2;
+static const int kStripFrames = -1;
 #else
 static const int kStripFrames = 3;
 #endif
