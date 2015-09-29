@@ -240,6 +240,9 @@
 /* How to access the PC from a struct ucontext */
 #undef PC_FROM_UCONTEXT
 
+/* Prevent to export functions, as we use statical linking */
+#define PERFTOOLS_DLL_DECL
+
 /* Always the empty-string on non-windows systems. On windows, should be
    "__declspec(dllexport)". This way, when we compile the dll, we export our
    functions/classes. It's safe to define this here because config.h is only
