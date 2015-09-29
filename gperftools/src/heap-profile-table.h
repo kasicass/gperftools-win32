@@ -203,7 +203,7 @@ class HeapProfileTable {
     }
 
     // Should this allocation be ignored if it looks like a leak?
-    bool ignore() const { return bucket_rep & kIgnore; }
+    bool ignore() const { return !!(bucket_rep & kIgnore); }
     void set_ignore(bool r) {
       bucket_rep = (bucket_rep & ~uintptr_t(kIgnore)) | (r ? kIgnore : 0);
     }

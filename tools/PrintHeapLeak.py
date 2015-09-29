@@ -8,7 +8,7 @@ import HeapProfileAddressTable
 
 if __name__ == '__main__':
 	ap = argparse.ArgumentParser(description='Print liveCount == sumCount callstacks')
-	ap.add_argument('-l', '--limit', dest='limit', type=int, default=1, help='> LIMIT Mb to print')
+	ap.add_argument('-l', '--limit', dest='limit', type=float, default=1, help='> LIMIT Mb to print')
 	ap.add_argument('filename', help='.heap file to parse')
 	args = ap.parse_args()
 
