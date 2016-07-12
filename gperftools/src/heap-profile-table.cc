@@ -201,10 +201,8 @@ HeapProfileTable::Bucket* HeapProfileTable::GetBucket(int depth,
   return b;
 }
 
-int HeapProfileTable::GetCallerStackTrace(
-    int skip_count, void* stack[kMaxStackDepth]) {
-  return MallocHook::GetCallerStackTrace(
-      stack, kMaxStackDepth, kStripFrames + skip_count + 1);
+int HeapProfileTable::GetCallerStackTrace(int skip_count, void* stack[kMaxStackDepth]) {
+  return MallocHook::GetCallerStackTrace(stack, kMaxStackDepth, kStripFrames + skip_count + 1);
 }
 
 void HeapProfileTable::RecordAlloc(
