@@ -35,5 +35,21 @@ int main()
 		pv[i] = 0;
 	}
 
+	HLOCAL localPtr = LocalAlloc(LMEM_MOVEABLE, 1024);
+	HeapProfilerDump("Try3");
+	LocalFree(localPtr);
+	HeapProfilerDump("Try4");
+
+//	void* p1 = HeapAlloc(GetProcessHeap(), 0, 1024);
+//	HeapProfilerDump("Try3");
+//	HeapFree(GetProcessHeap(), 0, p1);
+//	HeapProfilerDump("Try4");
+
+//	HLOCAL ptr = GlobalAlloc(GPTR, 1024);
+//	HeapProfilerDump("Try3");
+//	GlobalFree(ptr);
+//	HeapProfilerDump("Try4");
+
 	return 0;
 }
+
