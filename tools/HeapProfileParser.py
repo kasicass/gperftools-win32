@@ -16,7 +16,11 @@ class HeapProfileParser(object):
 		countTmp = countStr.split(':')
 		countInfo = (int(countTmp[0]), int(countTmp[1]), int(countTmp[2]), int(countTmp[3]))
 		stackInfo = tmp[1].strip().split(' ')
-		stackInfo = [int(a, 16) for a in stackInfo]
+		try:
+			# stackInfo = [''], then int(a,16) failed
+			stackInfo = [int(a, 16) for a in stackInfo]
+		except:
+			stackInfo = []
 		return (countInfo, stackInfo)
 
 	def parseLibLine(self, line):
