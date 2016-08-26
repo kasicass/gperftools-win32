@@ -3,6 +3,7 @@
 
 extern "C" void HeapProfilerStart(const char* prefix);
 extern "C" void HeapProfilerDump(const char *reason);
+extern "C" void HeapProfilerStop();
 
 void *mallocMe(unsigned int n)
 {
@@ -50,6 +51,7 @@ int main()
 //	GlobalFree(ptr);
 //	HeapProfilerDump("Try4");
 
+	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
 	return 0;
 }
 

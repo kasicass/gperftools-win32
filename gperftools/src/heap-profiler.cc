@@ -168,6 +168,7 @@ static char* global_profiler_buffer = NULL;
 // Access to all of these is protected by heap_lock.
 static bool  is_on = false;           // If are on as a subsytem.
 static bool  dumping = false;         // Dumping status to prevent recursion
+static bool  recording_alloc = false;
 static char* filename_prefix = NULL;  // Prefix used for profile file names
                                       // (NULL if no need for dumping yet)
 static int   dump_count = 0;          // How many dumps so far
@@ -340,13 +341,23 @@ static void RecordFree(const void* ptr) {
 // static
 void NewHook(const void* ptr, size_t size) {
   if (dumping) return;
-  if (ptr != NULL) RecordAlloc(ptr, size, 0);
+  if (ptr != NULL && !recording_alloc)
+  {
+    recording_alloc = true;
+    RecordAlloc(ptr, size, 0);
+	recording_alloc = false;
+  }
 }
 
 // static
 void DeleteHook(const void* ptr) {
   if (dumping) return;
-  if (ptr != NULL) RecordFree(ptr);
+  if (ptr != NULL && !recording_alloc)
+  {
+    recording_alloc = true;
+    RecordFree(ptr);
+	recording_alloc = false;
+  }
 }
 
 // TODO(jandrews): Re-enable stack tracing
