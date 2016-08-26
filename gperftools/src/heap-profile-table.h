@@ -197,13 +197,13 @@ class HeapProfileTable {
     size_t  bytes;   // Number of bytes in this allocation
 
     // Access to the allocation liveness flag (for leak checking)
-    bool live() const { return bucket_rep & kLive; }
+    bool live() const { return !!(bucket_rep & kLive); }
     void set_live(bool l) {
       bucket_rep = (bucket_rep & ~uintptr_t(kLive)) | (l ? kLive : 0);
     }
 
     // Should this allocation be ignored if it looks like a leak?
-    bool ignore() const { return bucket_rep & kIgnore; }
+    bool ignore() const { return !!(bucket_rep & kIgnore); }
     void set_ignore(bool r) {
       bucket_rep = (bucket_rep & ~uintptr_t(kIgnore)) | (r ? kIgnore : 0);
     }

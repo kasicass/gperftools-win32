@@ -67,6 +67,7 @@
     <ClCompile Include="..\gperftools\src\base\sysinfo.cc" />
     <ClCompile Include="..\gperftools\src\central_freelist.cc" />
     <ClCompile Include="..\gperftools\src\common.cc" />
+    <ClCompile Include="..\gperftools\src\fake_stacktrace_scope.cc" />
     <ClCompile Include="..\gperftools\src\heap-profile-table.cc" />
     <ClCompile Include="..\gperftools\src\heap-profiler.cc" />
     <ClCompile Include="..\gperftools\src\internal_logging.cc" />
