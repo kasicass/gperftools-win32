@@ -107,8 +107,12 @@ class PERFTOOLS_DLL_DECL MallocExtension {
   virtual bool MallocMemoryStats(int* blocks, size_t* total,
                                  int histogram[kMallocHistogramSize]);
 
-  // Get a human readable description of the current state of the malloc
-  // data structures.  The state is stored as a null-terminated string
+  // Get a human readable description of the following malloc data structures.
+  // - Total inuse memory by application.
+  // - Free memory(thread, central and page heap),
+  // - Freelist of central cache, each class.
+  // - Page heap freelist.
+  // The state is stored as a null-terminated string
   // in a prefix of "buffer[0,buffer_length-1]".
   // REQUIRES: buffer_length > 0.
   virtual void GetStats(char* buffer, int buffer_length);
@@ -391,6 +395,15 @@ class PERFTOOLS_DLL_DECL MallocExtension {
   // Like ReadStackTraces(), but returns stack traces that caused growth
   // in the address space size.
   virtual void** ReadHeapGrowthStackTraces();
+
+  // Returns the size in bytes of the calling threads cache.
+  virtual size_t GetThreadCacheSize();
+
+  // Like MarkThreadIdle, but does not destroy the internal data
+  // structures of the thread cache. When the thread resumes, it wil
+  // have an empty cache but will not need to pay to reconstruct the
+  // cache data structures.
+  virtual void MarkThreadTemporarilyIdle();
 };
 
 namespace base {

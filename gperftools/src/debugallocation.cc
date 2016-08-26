@@ -405,7 +405,7 @@ class MallocBlock {
     }
   }
 
-  size_t CheckAndClear(int type) {
+  size_t CheckAndClear(int type, size_t given_size) {
     alloc_map_lock_.Lock();
     CheckLocked(type);
     if (!IsMMapped()) {
@@ -416,6 +416,8 @@ class MallocBlock {
     alloc_map_lock_.Unlock();
     // clear us
     const size_t size = real_size();
+    RAW_CHECK(!given_size || given_size == size1_,
+              "right size must be passed to sized delete");
     memset(this, kMagicDeletedByte, size);
     return size;
   }
@@ -543,10 +545,10 @@ class MallocBlock {
     return b;
   }
 
-  void Deallocate(int type) {
+  void Deallocate(int type, size_t given_size) {
     if (IsMMapped()) {  // have to do this before CheckAndClear
 #ifdef HAVE_MMAP
-      int size = CheckAndClear(type);
+      int size = CheckAndClear(type, given_size);
       int pagesize = getpagesize();
       int num_pages = (size + pagesize - 1) / pagesize + 1;
       char* p = (char*) this;
@@ -559,7 +561,7 @@ class MallocBlock {
       }
 #endif
     } else {
-      const size_t size = CheckAndClear(type);
+      const size_t size = CheckAndClear(type, given_size);
       if (FLAGS_malloc_reclaim_memory) {
         // Instead of freeing the block immediately, push it onto a queue of
         // recently freed blocks.  Free only enough blocks to keep from
@@ -884,6 +886,9 @@ static void TracePrintf(int fd, const char *fmt, ...) {
   va_start(ap, fmt);
   const char *p = fmt;
   char numbuf[25];
+  if (fd < 0) {
+    return;
+  }
   numbuf[sizeof(numbuf)-1] = 0;
   while (*p != '\0') {              // until end of format string
     char *s = &numbuf[sizeof(numbuf)-1];
@@ -955,11 +960,20 @@ static void TracePrintf(int fd, const char *fmt, ...) {
 static int TraceFd() {
   static int trace_fd = -1;
   if (trace_fd == -1) {            // Open the trace file on the first call
-    trace_fd = open("/tmp/google.alloc", O_CREAT|O_TRUNC|O_WRONLY, 0666);
+    const char *val = getenv("TCMALLOC_TRACE_FILE");
+    bool fallback_to_stderr = false;
+    if (!val) {
+      val = "/tmp/google.alloc";
+      fallback_to_stderr = true;
+    }
+    trace_fd = open(val, O_CREAT|O_TRUNC|O_WRONLY, 0666);
     if (trace_fd == -1) {
-      trace_fd = 2;
-      TracePrintf(trace_fd,
-                  "Can't open /tmp/google.alloc.  Logging to stderr.\n");
+      if (fallback_to_stderr) {
+        trace_fd = 2;
+        TracePrintf(trace_fd, "Can't open %s.  Logging to stderr.\n", val);
+      } else {
+        TracePrintf(2, "Can't open %s.  Logging disabled.\n", val);
+      }
     }
     // Add a header to the log.
     TracePrintf(trace_fd, "Trace started: %lu\n",
@@ -1018,11 +1032,11 @@ static inline void* DebugAllocate(size_t size, int type) {
   return ptr->data_addr();
 }
 
-static inline void DebugDeallocate(void* ptr, int type) {
+static inline void DebugDeallocate(void* ptr, int type, size_t given_size) {
   MALLOC_TRACE("free",
                (ptr != 0 ? MallocBlock::FromRawPointer(ptr)->data_size() : 0),
                ptr);
-  if (ptr)  MallocBlock::FromRawPointer(ptr)->Deallocate(type);
+  if (ptr)  MallocBlock::FromRawPointer(ptr)->Deallocate(type, given_size);
 }
 
 // ========================================================================= //
@@ -1157,78 +1171,73 @@ REGISTER_MODULE_DESTRUCTOR(debugallocation, {
 
 // ========================================================================= //
 
+struct debug_alloc_retry_data {
+  size_t size;
+  int new_type;
+};
+
+static void *retry_debug_allocate(void *arg) {
+  debug_alloc_retry_data *data = static_cast<debug_alloc_retry_data *>(arg);
+  return DebugAllocate(data->size, data->new_type);
+}
+
 // This is mostly the same a cpp_alloc in tcmalloc.cc.
 // TODO(csilvers): change Allocate() above to call cpp_alloc, so we
 // don't have to reproduce the logic here.  To make tc_new_mode work
 // properly, I think we'll need to separate out the logic of throwing
 // from the logic of calling the new-handler.
 inline void* debug_cpp_alloc(size_t size, int new_type, bool nothrow) {
-  for (;;) {
-    void* p = DebugAllocate(size, new_type);
-#ifdef PREANSINEW
+  void* p = DebugAllocate(size, new_type);
+  if (p != NULL) {
     return p;
-#else
-    if (p == NULL) {  // allocation failed
-      // Get the current new handler.  NB: this function is not
-      // thread-safe.  We make a feeble stab at making it so here, but
-      // this lock only protects against tcmalloc interfering with
-      // itself, not with other libraries calling set_new_handler.
-      std::new_handler nh;
-      {
-        SpinLockHolder h(&set_new_handler_lock);
-        nh = std::set_new_handler(0);
-        (void) std::set_new_handler(nh);
-      }
-#if (defined(__GNUC__) && !defined(__EXCEPTIONS)) || (defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS)
-      if (nh) {
-        // Since exceptions are disabled, we don't really know if new_handler
-        // failed.  Assume it will abort if it fails.
-        (*nh)();
-        continue;
-      }
-      return 0;
-#else
-      // If no new_handler is established, the allocation failed.
-      if (!nh) {
-        if (nothrow) return 0;
-        throw std::bad_alloc();
-      }
-      // Otherwise, try the new_handler.  If it returns, retry the
-      // allocation.  If it throws std::bad_alloc, fail the allocation.
-      // if it throws something else, don't interfere.
-      try {
-        (*nh)();
-      } catch (const std::bad_alloc&) {
-        if (!nothrow) throw;
-        return p;
-      }
-#endif  // (defined(__GNUC__) && !defined(__EXCEPTIONS)) || (defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS)
-    } else {  // allocation success
-      return p;
-    }
-#endif  // PREANSINEW
   }
+  struct debug_alloc_retry_data data;
+  data.size = size;
+  data.new_type = new_type;
+  return handle_oom(retry_debug_allocate, &data,
+                    true, nothrow);
 }
 
 inline void* do_debug_malloc_or_debug_cpp_alloc(size_t size) {
-  return tc_new_mode ? debug_cpp_alloc(size, MallocBlock::kMallocType, true)
-                     : DebugAllocate(size, MallocBlock::kMallocType);
+  void* p = DebugAllocate(size, MallocBlock::kMallocType);
+  if (p != NULL) {
+    return p;
+  }
+  struct debug_alloc_retry_data data;
+  data.size = size;
+  data.new_type = MallocBlock::kMallocType;
+  return handle_oom(retry_debug_allocate, &data,
+                    false, true);
 }
 
 // Exported routines
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_malloc(size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_malloc(size_t size) PERFTOOLS_THROW {
+  if (ThreadCache::IsUseEmergencyMalloc()) {
+    return tcmalloc::EmergencyMalloc(size);
+  }
   void* ptr = do_debug_malloc_or_debug_cpp_alloc(size);
   MallocHook::InvokeNewHook(ptr, size);
   return ptr;
 }
 
-extern "C" PERFTOOLS_DLL_DECL void tc_free(void* ptr) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_free(void* ptr) PERFTOOLS_THROW {
+  if (tcmalloc::IsEmergencyPtr(ptr)) {
+    return tcmalloc::EmergencyFree(ptr);
+  }
   MallocHook::InvokeDeleteHook(ptr);
-  DebugDeallocate(ptr, MallocBlock::kMallocType);
+  DebugDeallocate(ptr, MallocBlock::kMallocType, 0);
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_calloc(size_t count, size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_free_sized(void *ptr, size_t size) PERFTOOLS_THROW {
+  MallocHook::InvokeDeleteHook(ptr);
+  DebugDeallocate(ptr, MallocBlock::kMallocType, size);
+}
+
+extern "C" PERFTOOLS_DLL_DECL void* tc_calloc(size_t count, size_t size) PERFTOOLS_THROW {
+  if (ThreadCache::IsUseEmergencyMalloc()) {
+    return tcmalloc::EmergencyCalloc(count, size);
+  }
   // Overflow check
   const size_t total_size = count * size;
   if (size != 0 && total_size / size != count) return NULL;
@@ -1239,12 +1248,18 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_calloc(size_t count, size_t size) __THROW
   return block;
 }
 
-extern "C" PERFTOOLS_DLL_DECL void tc_cfree(void* ptr) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_cfree(void* ptr) PERFTOOLS_THROW {
+  if (tcmalloc::IsEmergencyPtr(ptr)) {
+    return tcmalloc::EmergencyFree(ptr);
+  }
   MallocHook::InvokeDeleteHook(ptr);
-  DebugDeallocate(ptr, MallocBlock::kMallocType);
+  DebugDeallocate(ptr, MallocBlock::kMallocType, 0);
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_realloc(void* ptr, size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_realloc(void* ptr, size_t size) PERFTOOLS_THROW {
+  if (tcmalloc::IsEmergencyPtr(ptr)) {
+    return tcmalloc::EmergencyRealloc(ptr, size);
+  }
   if (ptr == NULL) {
     ptr = do_debug_malloc_or_debug_cpp_alloc(size);
     MallocHook::InvokeNewHook(ptr, size);
@@ -1252,7 +1267,7 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_realloc(void* ptr, size_t size) __THROW {
   }
   if (size == 0) {
     MallocHook::InvokeDeleteHook(ptr);
-    DebugDeallocate(ptr, MallocBlock::kMallocType);
+    DebugDeallocate(ptr, MallocBlock::kMallocType, 0);
     return NULL;
   }
   MallocBlock* old = MallocBlock::FromRawPointer(ptr);
@@ -1277,7 +1292,7 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_realloc(void* ptr, size_t size) __THROW {
   memcpy(p->data_addr(), ptr, (old_size < size) ? old_size : size);
   MallocHook::InvokeDeleteHook(ptr);
   MallocHook::InvokeNewHook(p->data_addr(), size);
-  DebugDeallocate(ptr, MallocBlock::kMallocType);
+  DebugDeallocate(ptr, MallocBlock::kMallocType, 0);
   MALLOC_TRACE("realloc", p->data_size(), p->data_addr());
   return p->data_addr();
 }
@@ -1291,22 +1306,27 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_new(size_t size) {
   return ptr;
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_new_nothrow(size_t size, const std::nothrow_t&) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_new_nothrow(size_t size, const std::nothrow_t&) PERFTOOLS_THROW {
   void* ptr = debug_cpp_alloc(size, MallocBlock::kNewType, true);
   MallocHook::InvokeNewHook(ptr, size);
   return ptr;
 }
 
-extern "C" PERFTOOLS_DLL_DECL void tc_delete(void* p) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_delete(void* p) PERFTOOLS_THROW {
   MallocHook::InvokeDeleteHook(p);
-  DebugDeallocate(p, MallocBlock::kNewType);
+  DebugDeallocate(p, MallocBlock::kNewType, 0);
+}
+
+extern "C" PERFTOOLS_DLL_DECL void tc_delete_sized(void* p, size_t size) throw() {
+  MallocHook::InvokeDeleteHook(p);
+  DebugDeallocate(p, MallocBlock::kNewType, size);
 }
 
 // Some STL implementations explicitly invoke this.
 // It is completely equivalent to a normal delete (delete never throws).
-extern "C" PERFTOOLS_DLL_DECL void tc_delete_nothrow(void* p, const std::nothrow_t&) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_delete_nothrow(void* p, const std::nothrow_t&) PERFTOOLS_THROW {
   MallocHook::InvokeDeleteHook(p);
-  DebugDeallocate(p, MallocBlock::kNewType);
+  DebugDeallocate(p, MallocBlock::kNewType, 0);
 }
 
 extern "C" PERFTOOLS_DLL_DECL void* tc_newarray(size_t size) {
@@ -1319,22 +1339,27 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_newarray(size_t size) {
 }
 
 extern "C" PERFTOOLS_DLL_DECL void* tc_newarray_nothrow(size_t size, const std::nothrow_t&)
-    __THROW {
+    PERFTOOLS_THROW {
   void* ptr = debug_cpp_alloc(size, MallocBlock::kArrayNewType, true);
   MallocHook::InvokeNewHook(ptr, size);
   return ptr;
 }
 
-extern "C" PERFTOOLS_DLL_DECL void tc_deletearray(void* p) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_deletearray(void* p) PERFTOOLS_THROW {
   MallocHook::InvokeDeleteHook(p);
-  DebugDeallocate(p, MallocBlock::kArrayNewType);
+  DebugDeallocate(p, MallocBlock::kArrayNewType, 0);
+}
+
+extern "C" PERFTOOLS_DLL_DECL void tc_deletearray_sized(void* p, size_t size) throw() {
+  MallocHook::InvokeDeleteHook(p);
+  DebugDeallocate(p, MallocBlock::kArrayNewType, size);
 }
 
 // Some STL implementations explicitly invoke this.
 // It is completely equivalent to a normal delete (delete never throws).
-extern "C" PERFTOOLS_DLL_DECL void tc_deletearray_nothrow(void* p, const std::nothrow_t&) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_deletearray_nothrow(void* p, const std::nothrow_t&) PERFTOOLS_THROW {
   MallocHook::InvokeDeleteHook(p);
-  DebugDeallocate(p, MallocBlock::kArrayNewType);
+  DebugDeallocate(p, MallocBlock::kArrayNewType, 0);
 }
 
 // This is mostly the same as do_memalign in tcmalloc.cc.
@@ -1370,60 +1395,31 @@ static void *do_debug_memalign(size_t alignment, size_t size) {
   return p;
 }
 
-// This is mostly the same as cpp_memalign in tcmalloc.cc.
-static void* debug_cpp_memalign(size_t align, size_t size) {
-  for (;;) {
-    void* p = do_debug_memalign(align, size);
-#ifdef PREANSINEW
-    return p;
-#else
-    if (p == NULL) {  // allocation failed
-      // Get the current new handler.  NB: this function is not
-      // thread-safe.  We make a feeble stab at making it so here, but
-      // this lock only protects against tcmalloc interfering with
-      // itself, not with other libraries calling set_new_handler.
-      std::new_handler nh;
-      {
-        SpinLockHolder h(&set_new_handler_lock);
-        nh = std::set_new_handler(0);
-        (void) std::set_new_handler(nh);
-      }
-#if (defined(__GNUC__) && !defined(__EXCEPTIONS)) || (defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS)
-      if (nh) {
-        // Since exceptions are disabled, we don't really know if new_handler
-        // failed.  Assume it will abort if it fails.
-        (*nh)();
-        continue;
-      }
-      return 0;
-#else
-      // If no new_handler is established, the allocation failed.
-      if (!nh)
-        return 0;
+struct memalign_retry_data {
+  size_t align;
+  size_t size;
+};
 
-      // Otherwise, try the new_handler.  If it returns, retry the
-      // allocation.  If it throws std::bad_alloc, fail the allocation.
-      // if it throws something else, don't interfere.
-      try {
-        (*nh)();
-      } catch (const std::bad_alloc&) {
-        return p;
-      }
-#endif  // (defined(__GNUC__) && !defined(__EXCEPTIONS)) || (defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS)
-    } else {  // allocation success
-      return p;
-    }
-#endif  // PREANSINEW
-  }
+static void *retry_debug_memalign(void *arg) {
+  memalign_retry_data *data = static_cast<memalign_retry_data *>(arg);
+  return do_debug_memalign(data->align, data->size);
 }
 
 inline void* do_debug_memalign_or_debug_cpp_memalign(size_t align,
                                                      size_t size) {
-  return tc_new_mode ? debug_cpp_memalign(align, size)
-                     : do_debug_memalign(align, size);
+  void* p = do_debug_memalign(align, size);
+  if (p != NULL) {
+    return p;
+  }
+
+  struct memalign_retry_data data;
+  data.align = align;
+  data.size = size;
+  return handle_oom(retry_debug_memalign, &data,
+                    false, true);
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_memalign(size_t align, size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_memalign(size_t align, size_t size) PERFTOOLS_THROW {
   void *p = do_debug_memalign_or_debug_cpp_memalign(align, size);
   MallocHook::InvokeNewHook(p, size);
   return p;
@@ -1431,7 +1427,7 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_memalign(size_t align, size_t size) __THR
 
 // Implementation taken from tcmalloc/tcmalloc.cc
 extern "C" PERFTOOLS_DLL_DECL int tc_posix_memalign(void** result_ptr, size_t align, size_t size)
-    __THROW {
+    PERFTOOLS_THROW {
   if (((align % sizeof(void*)) != 0) ||
       ((align & (align - 1)) != 0) ||
       (align == 0)) {
@@ -1448,14 +1444,14 @@ extern "C" PERFTOOLS_DLL_DECL int tc_posix_memalign(void** result_ptr, size_t al
   }
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_valloc(size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_valloc(size_t size) PERFTOOLS_THROW {
   // Allocate >= size bytes starting on a page boundary
   void *p = do_debug_memalign_or_debug_cpp_memalign(getpagesize(), size);
   MallocHook::InvokeNewHook(p, size);
   return p;
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_pvalloc(size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_pvalloc(size_t size) PERFTOOLS_THROW {
   // Round size up to a multiple of pages
   // then allocate memory on a page boundary
   int pagesize = getpagesize();
@@ -1469,25 +1465,25 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_pvalloc(size_t size) __THROW {
 }
 
 // malloc_stats just falls through to the base implementation.
-extern "C" PERFTOOLS_DLL_DECL void tc_malloc_stats(void) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void tc_malloc_stats(void) PERFTOOLS_THROW {
   do_malloc_stats();
 }
 
-extern "C" PERFTOOLS_DLL_DECL int tc_mallopt(int cmd, int value) __THROW {
+extern "C" PERFTOOLS_DLL_DECL int tc_mallopt(int cmd, int value) PERFTOOLS_THROW {
   return do_mallopt(cmd, value);
 }
 
 #ifdef HAVE_STRUCT_MALLINFO
-extern "C" PERFTOOLS_DLL_DECL struct mallinfo tc_mallinfo(void) __THROW {
+extern "C" PERFTOOLS_DLL_DECL struct mallinfo tc_mallinfo(void) PERFTOOLS_THROW {
   return do_mallinfo();
 }
 #endif
 
-extern "C" PERFTOOLS_DLL_DECL size_t tc_malloc_size(void* ptr) __THROW {
+extern "C" PERFTOOLS_DLL_DECL size_t tc_malloc_size(void* ptr) PERFTOOLS_THROW {
   return MallocExtension::instance()->GetAllocatedSize(ptr);
 }
 
-extern "C" PERFTOOLS_DLL_DECL void* tc_malloc_skip_new_handler(size_t size) __THROW {
+extern "C" PERFTOOLS_DLL_DECL void* tc_malloc_skip_new_handler(size_t size) PERFTOOLS_THROW {
   void* result = DebugAllocate(size, MallocBlock::kMallocType);
   MallocHook::InvokeNewHook(result, size);
   return result;

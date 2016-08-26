@@ -44,7 +44,7 @@ namespace tcmalloc {
 // thread and central caches.
 static int32 FLAGS_tcmalloc_transfer_num_objects;
 
-static const int32 kDefaultTransferNumObjecs = 32768;
+static const int32 kDefaultTransferNumObjecs = 512;
 
 // The init function is provided to explicit initialize the variable value
 // from the env. var to avoid C++ global construction that might defer its
@@ -220,10 +220,9 @@ void SizeMap::Init() {
 // Metadata allocator -- keeps stats about how many bytes allocated.
 static uint64_t metadata_system_bytes_ = 0;
 static const size_t kMetadataAllocChunkSize = 8*1024*1024;
-static const size_t kMetadataBigAllocThreshold = kMetadataAllocChunkSize / 8;
-// usually malloc uses larger alignments, but because metadata cannot
-// have and fancy simd types, aligning on pointer size seems fine
-static const size_t kMetadataAllignment = sizeof(void *);
+// As ThreadCache objects are allocated with MetaDataAlloc, and also
+// CACHELINE_ALIGNED, we must use the same alignment as TCMalloc_SystemAlloc.
+static const size_t kMetadataAllignment = sizeof(MemoryAligner);
 
 static char *metadata_chunk_alloc_;
 static size_t metadata_chunk_avail_;

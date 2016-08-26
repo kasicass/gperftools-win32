@@ -101,14 +101,14 @@ const char HeapProfileTable::kFileExt[] = ".heap";
 //----------------------------------------------------------------------
 
 static const int kHashTableSize = 179999;   // Size for bucket_table_.
-// /*static*/ const int HeapProfileTable::kMaxStackDepth;
+/*static*/ const int HeapProfileTable::kMaxStackDepth;
 
 //----------------------------------------------------------------------
 
 // We strip out different number of stack frames in debug mode
 // because less inlining happens in that case
 #ifdef NDEBUG
-static const int kStripFrames = -1;
+static const int kStripFrames = 2;
 #else
 static const int kStripFrames = 3;
 #endif
@@ -201,8 +201,10 @@ HeapProfileTable::Bucket* HeapProfileTable::GetBucket(int depth,
   return b;
 }
 
-int HeapProfileTable::GetCallerStackTrace(int skip_count, void* stack[kMaxStackDepth]) {
-  return MallocHook::GetCallerStackTrace(stack, kMaxStackDepth, kStripFrames + skip_count + 1);
+int HeapProfileTable::GetCallerStackTrace(
+    int skip_count, void* stack[kMaxStackDepth]) {
+  return MallocHook::GetCallerStackTrace(
+      stack, kMaxStackDepth, kStripFrames + skip_count + 1);
 }
 
 void HeapProfileTable::RecordAlloc(
@@ -348,7 +350,10 @@ int HeapProfileTable::FillOrderedProfile(char buf[], int size) const {
   // is remaining, and then move the maps info one last time to close
   // any gaps.  Whew!
   int map_length = snprintf(buf, size, "%s", kProcSelfMapsHeader);
-  if (map_length < 0 || map_length >= size) return 0;
+  if (map_length < 0 || map_length >= size) {
+      dealloc_(list);
+      return 0;
+  }
   bool dummy;   // "wrote_all" -- did /proc/self/maps fit in its entirety?
   map_length += FillProcSelfMaps(buf + map_length, size - map_length, &dummy);
   RAW_DCHECK(map_length <= size, "");
@@ -359,7 +364,10 @@ int HeapProfileTable::FillOrderedProfile(char buf[], int size) const {
   Stats stats;
   memset(&stats, 0, sizeof(stats));
   int bucket_length = snprintf(buf, size, "%s", kProfileHeader);
-  if (bucket_length < 0 || bucket_length >= size) return 0;
+  if (bucket_length < 0 || bucket_length >= size) {
+      dealloc_(list);
+      return 0;
+  }
   bucket_length = UnparseBucket(total_, buf, bucket_length, size,
                                 " heapprofile", &stats);
 

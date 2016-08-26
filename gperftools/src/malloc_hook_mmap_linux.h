@@ -105,7 +105,7 @@ static inline void* do_mmap64(void *start, size_t length,
     // Fall back to old 32-bit offset mmap() call
     // Old syscall interface cannot handle six args, so pass in an array
     int32 args[6] = { (int32) start, (int32) length, prot, flags, fd,
-                      (off_t) offset };
+                      (int32)(off_t) offset };
     result = (void *)syscall(SYS_mmap, args);
   }
 #else
@@ -115,6 +115,20 @@ static inline void* do_mmap64(void *start, size_t length,
 
  out:
   return result;
+}
+
+#define MALLOC_HOOK_HAVE_DO_MMAP64 1
+
+#elif defined(__s390x__)
+
+static inline void* do_mmap64(void *start, size_t length,
+                              int prot, int flags,
+                              int fd, __off64_t offset) __THROW {
+  // mmap on s390x uses the old syscall interface
+  unsigned long args[6] = { (unsigned long) start, (unsigned long) length,
+                            (unsigned long) prot, (unsigned long) flags,
+                            (unsigned long) fd, (unsigned long) offset };
+  return sys_mmap(args);
 }
 
 #define MALLOC_HOOK_HAVE_DO_MMAP64 1

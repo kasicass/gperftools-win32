@@ -44,6 +44,9 @@
 #endif
 #include <gperftools/tcmalloc.h>
 
+#include "getenv_safe.h" // TCMallocGetenvSafe
+#include "base/commandlineflags.h"
+
 #ifndef __THROW    // I guess we're not on a glibc-like system
 # define __THROW   // __THROW is just an optimization, so ok to make it ""
 #endif
@@ -52,24 +55,86 @@
 # error libc_override_gcc_and_weak.h is for gcc distributions only.
 #endif
 
-#define ALIAS(tc_fn)   __attribute__ ((alias (#tc_fn)))
+#define ALIAS(tc_fn)   __attribute__ ((alias (#tc_fn), used))
 
 void* operator new(size_t size) throw (std::bad_alloc)
     ALIAS(tc_new);
-void operator delete(void* p) __THROW
+void operator delete(void* p) throw()
     ALIAS(tc_delete);
 void* operator new[](size_t size) throw (std::bad_alloc)
     ALIAS(tc_newarray);
-void operator delete[](void* p) __THROW
+void operator delete[](void* p) throw()
     ALIAS(tc_deletearray);
-void* operator new(size_t size, const std::nothrow_t& nt) __THROW
+void* operator new(size_t size, const std::nothrow_t& nt) throw()
     ALIAS(tc_new_nothrow);
-void* operator new[](size_t size, const std::nothrow_t& nt) __THROW
+void* operator new[](size_t size, const std::nothrow_t& nt) throw()
     ALIAS(tc_newarray_nothrow);
-void operator delete(void* p, const std::nothrow_t& nt) __THROW
+void operator delete(void* p, const std::nothrow_t& nt) throw()
     ALIAS(tc_delete_nothrow);
-void operator delete[](void* p, const std::nothrow_t& nt) __THROW
+void operator delete[](void* p, const std::nothrow_t& nt) throw()
     ALIAS(tc_deletearray_nothrow);
+
+#if defined(ENABLE_SIZED_DELETE)
+
+void operator delete(void *p, size_t size) throw()
+    ALIAS(tc_delete_sized);
+void operator delete[](void *p, size_t size) throw()
+    ALIAS(tc_deletearray_sized);
+
+#elif defined(ENABLE_DYNAMIC_SIZED_DELETE) && \
+  (__GNUC__ * 100 + __GNUC_MINOR__) >= 405
+
+static void delegate_sized_delete(void *p, size_t s) throw() {
+  (operator delete)(p);
+}
+
+static void delegate_sized_deletearray(void *p, size_t s) throw() {
+  (operator delete[])(p);
+}
+
+extern "C" __attribute__((weak))
+int tcmalloc_sized_delete_enabled(void);
+
+static bool sized_delete_enabled(void) {
+  if (tcmalloc_sized_delete_enabled != 0) {
+    return !!tcmalloc_sized_delete_enabled();
+  }
+
+  const char *flag = TCMallocGetenvSafe("TCMALLOC_ENABLE_SIZED_DELETE");
+  return tcmalloc::commandlineflags::StringToBool(flag, false);
+}
+
+extern "C" {
+
+static void *resolve_delete_sized(void) {
+  if (sized_delete_enabled()) {
+    return reinterpret_cast<void *>(tc_delete_sized);
+  }
+  return reinterpret_cast<void *>(delegate_sized_delete);
+}
+
+static void *resolve_deletearray_sized(void) {
+  if (sized_delete_enabled()) {
+    return reinterpret_cast<void *>(tc_deletearray_sized);
+  }
+  return reinterpret_cast<void *>(delegate_sized_deletearray);
+}
+
+}
+
+void operator delete(void *p, size_t size) throw()
+  __attribute__((ifunc("resolve_delete_sized")));
+void operator delete[](void *p, size_t size) throw()
+  __attribute__((ifunc("resolve_deletearray_sized")));
+
+#else /* !ENABLE_SIZED_DELETE && !ENABLE_DYN_SIZED_DELETE */
+
+void operator delete(void *p, size_t size) throw()
+  ALIAS(tc_delete);
+void operator delete[](void *p, size_t size) throw()
+  ALIAS(tc_deletearray);
+
+#endif /* !ENABLE_SIZED_DELETE && !ENABLE_DYN_SIZED_DELETE */
 
 extern "C" {
   void* malloc(size_t size) __THROW               ALIAS(tc_malloc);

@@ -148,13 +148,13 @@ my @stackTraces;
 sub usage_string {
   return <<EOF;
 Usage:
-pprof [options] <program> <profiles>
+$0 [options] <program> <profiles>
    <profiles> is a space separated list of profile names.
-pprof [options] <symbolized-profiles>
+$0 [options] <symbolized-profiles>
    <symbolized-profiles> is a list of profile files where each file contains
    the necessary symbol mappings  as well as profile data (likely generated
    with --raw).
-pprof [options] <profile>
+$0 [options] <profile>
    <profile> is a remote form.  Symbols are obtained from host:port$SYMBOL_PAGE
 
    Each name can be:
@@ -165,9 +165,9 @@ pprof [options] <profile>
                          $GROWTH_PAGE, $CONTENTION_PAGE, /pprof/wall,
                          $CENSUSPROFILE_PAGE, or /pprof/filteredprofile.
    For instance:
-     pprof http://myserver.com:80$HEAP_PAGE
+     $0 http://myserver.com:80$HEAP_PAGE
    If /<service> is omitted, the service defaults to $PROFILE_PAGE (cpu profiling).
-pprof --symbols <program>
+$0 --symbols <program>
    Maps addresses to symbol names.  In this mode, stdin should be a
    list of library mappings, in the same format as is found in the heap-
    and cpu-profile files (this loosely matches that of /proc/self/maps
@@ -209,6 +209,8 @@ Output type:
    --svg               Generate SVG to stdout
    --gif               Generate GIF to stdout
    --raw               Generate symbolized pprof data (useful with remote fetch)
+   --collapsed         Generate collapsed stacks for building flame graphs
+                       (see http://www.brendangregg.com/flamegraphs.html)
 
 Heap-Profile Options:
    --inuse_space       Display in-use (mega)bytes [default]
@@ -250,29 +252,29 @@ Environment Variables:
 
 Examples:
 
-pprof /bin/ls ls.prof
+$0 /bin/ls ls.prof
                        Enters "interactive" mode
-pprof --text /bin/ls ls.prof
+$0 --text /bin/ls ls.prof
                        Outputs one line per procedure
-pprof --web /bin/ls ls.prof
+$0 --web /bin/ls ls.prof
                        Displays annotated call-graph in web browser
-pprof --gv /bin/ls ls.prof
+$0 --gv /bin/ls ls.prof
                        Displays annotated call-graph via 'gv'
-pprof --gv --focus=Mutex /bin/ls ls.prof
+$0 --gv --focus=Mutex /bin/ls ls.prof
                        Restricts to code paths including a .*Mutex.* entry
-pprof --gv --focus=Mutex --ignore=string /bin/ls ls.prof
+$0 --gv --focus=Mutex --ignore=string /bin/ls ls.prof
                        Code paths including Mutex but not string
-pprof --list=getdir /bin/ls ls.prof
+$0 --list=getdir /bin/ls ls.prof
                        (Per-line) annotated source listing for getdir()
-pprof --disasm=getdir /bin/ls ls.prof
+$0 --disasm=getdir /bin/ls ls.prof
                        (Per-PC) annotated disassembly for getdir()
 
-pprof http://localhost:1234/
+$0 http://localhost:1234/
                        Enters "interactive" mode
-pprof --text localhost:1234
+$0 --text localhost:1234
                        Outputs one line per procedure for localhost:1234
-pprof --raw localhost:1234 > ./local.raw
-pprof --text ./local.raw
+$0 --raw localhost:1234 > ./local.raw
+$0 --text ./local.raw
                        Fetches a remote profile for later analysis and then
                        analyzes it in text mode.
 EOF
@@ -338,6 +340,7 @@ sub Init() {
   $main::opt_gif = 0;
   $main::opt_svg = 0;
   $main::opt_raw = 0;
+  $main::opt_collapsed = 0;
 
   $main::opt_nodecount = 80;
   $main::opt_nodefraction = 0.005;
@@ -414,6 +417,7 @@ sub Init() {
              "svg!"           => \$main::opt_svg,
              "gif!"           => \$main::opt_gif,
              "raw!"           => \$main::opt_raw,
+             "collapsed!"     => \$main::opt_collapsed,
              "interactive!"   => \$main::opt_interactive,
              "nodecount=i"    => \$main::opt_nodecount,
              "nodefraction=f" => \$main::opt_nodefraction,
@@ -497,6 +501,7 @@ sub Init() {
       $main::opt_svg +
       $main::opt_gif +
       $main::opt_raw +
+      $main::opt_collapsed +
       $main::opt_interactive +
       0;
   if ($modes > 1) {
@@ -685,6 +690,8 @@ sub Main() {
       PrintText($symbols, $flat, $cumulative, -1);
     } elsif ($main::opt_raw) {
       PrintSymbolizedProfile($symbols, $profile, $main::prog);
+    } elsif ($main::opt_collapsed) {
+      PrintCollapsedStacks($symbols, $profile);
     } elsif ($main::opt_callgrind) {
       PrintCallgrind($calls);
     } else {
@@ -1295,7 +1302,7 @@ sub PrintCallgrind {
     $filename = "&STDOUT";
   }
   open(CG, ">$filename");
-  printf CG ("events: Hits\n\n");
+  print CG ("events: Hits\n\n");
   foreach my $call ( map { $_->[0] }
                      sort { $a->[1] cmp $b ->[1] ||
                             $a->[2] <=> $b->[2] }
@@ -1311,14 +1318,14 @@ sub PrintCallgrind {
     # TODO(csilvers): for better compression, collect all the
     # caller/callee_files and functions first, before printing
     # anything, and only compress those referenced more than once.
-    printf CG CompressedCGName("fl", $caller_file, \%filename_to_index_map);
-    printf CG CompressedCGName("fn", $caller_function, \%fnname_to_index_map);
+    print CG CompressedCGName("fl", $caller_file, \%filename_to_index_map);
+    print CG CompressedCGName("fn", $caller_function, \%fnname_to_index_map);
     if (defined $6) {
-      printf CG CompressedCGName("cfl", $callee_file, \%filename_to_index_map);
-      printf CG CompressedCGName("cfn", $callee_function, \%fnname_to_index_map);
-      printf CG ("calls=$count $callee_line\n");
+      print CG CompressedCGName("cfl", $callee_file, \%filename_to_index_map);
+      print CG CompressedCGName("cfn", $callee_function, \%fnname_to_index_map);
+      print CG ("calls=$count $callee_line\n");
     }
-    printf CG ("$caller_line $count\n\n");
+    print CG ("$caller_line $count\n\n");
   }
 }
 
@@ -2829,6 +2836,66 @@ sub IsSecondPcAlwaysTheSame {
   return $second_pc;
 }
 
+sub ExtractSymbolLocationInlineStack {
+  my $symbols = shift;
+  my $address = shift;
+  my $stack = shift;
+  # 'addr2line' outputs "??:0" for unknown locations; we do the
+  # same to be consistent.
+  if (exists $symbols->{$address}) {
+    my @localinlinestack = @{$symbols->{$address}};
+    for (my $i = $#localinlinestack; $i > 0; $i-=3) {
+      my $file = $localinlinestack[$i-1];
+      my $fn = $localinlinestack[$i-2];
+      if ($file eq "?" || $file eq ":0") {
+        $file = "??:0";
+      }
+      my $suffix = "[inline]";
+      if ($i == 2) {
+        $suffix = "";
+      }
+      push (@$stack, $file.":".$fn.$suffix);
+    }
+  }
+  else {
+      push (@$stack, "??:0:unknown");
+  }
+}
+
+sub ExtractSymbolNameInlineStack {
+  my $symbols = shift;
+  my $address = shift;
+
+  my @stack = ();
+
+  if (exists $symbols->{$address}) {
+    my @localinlinestack = @{$symbols->{$address}};
+    for (my $i = $#localinlinestack; $i > 0; $i-=3) {
+      my $file = $localinlinestack[$i-1];
+      my $fn = $localinlinestack[$i-0];
+
+      if ($file eq "?" || $file eq ":0") {
+        $file = "??:0";
+      }
+      if ($fn eq '??') {
+        # If we can't get the symbol name, at least use the file information.
+        $fn = $file;
+      }
+      my $suffix = "[inline]";
+      if ($i == 2) {
+        $suffix = "";
+      }
+      push (@stack, $fn.$suffix);
+    }
+  }
+  else {
+    # If we can't get a symbol name, at least fill in the address.
+    push (@stack, $address);
+  }
+
+  return @stack;
+}
+
 sub ExtractSymbolLocation {
   my $symbols = shift;
   my $address = shift;
@@ -2837,7 +2904,7 @@ sub ExtractSymbolLocation {
   my $location = "??:0:unknown";
   if (exists $symbols->{$address}) {
     my $file = $symbols->{$address}->[1];
-    if ($file eq "?") {
+    if ($file eq "?" || $file eq ":0") {
       $file = "??:0"
     }
     $location = $file . ":" . $symbols->{$address}->[0];
@@ -2849,20 +2916,19 @@ sub ExtractSymbolLocation {
 sub ExtractCalls {
   my $symbols = shift;
   my $profile = shift;
-
   my $calls = {};
   while( my ($stack_trace, $count) = each %$profile ) {
     my @address = split(/\n/, $stack_trace);
-    my $destination = ExtractSymbolLocation($symbols, $address[0]);
-    AddEntry($calls, $destination, $count);
+    my @stack = ();
+    ExtractSymbolLocationInlineStack($symbols, $address[0], \@stack);
     for (my $i = 1; $i <= $#address; $i++) {
-      my $source = ExtractSymbolLocation($symbols, $address[$i]);
-      my $call = "$source -> $destination";
-      AddEntry($calls, $call, $count);
-      $destination = $source;
+      ExtractSymbolLocationInlineStack($symbols, $address[$i], \@stack);
+    }
+    AddEntry($calls, $stack[0], $count);
+    for (my $i = 1; $i < $#address; $i++) {
+      AddEntry($calls, "$stack[$i] -> $stack[$i-1]", $count);
     }
   }
-
   return $calls;
 }
 
@@ -2876,6 +2942,17 @@ sub PrintStacksForText {
       $address[$i] = sprintf("(%s) %s", $address[$i], ExtractSymbolLocation($symbols, $address[$i]));
     }
     printf("%-8d %s\n\n", $count, join("\n         ", @address));
+  }
+}
+
+sub PrintCollapsedStacks {
+  my $symbols = shift;
+  my $profile = shift;
+
+  while (my ($stack_trace, $count) = each %$profile) {
+    my @address = split(/\n/, $stack_trace);
+    my @names = reverse ( map { ExtractSymbolNameInlineStack($symbols, $_) } @address );
+    printf("%s %d\n", join(";", @names), $count);
   }
 }
 
@@ -3333,7 +3410,7 @@ sub ResolveRedirectionForCurl {
 # Add a timeout flat to URL_FETCHER.  Returns a new list.
 sub AddFetchTimeout {
   my $timeout = shift;
-  my @fetcher = shift;
+  my @fetcher = @_;
   if (defined($timeout)) {
     if (join(" ", @fetcher) =~ m/\bcurl -s/) {
       push(@fetcher, "--max-time", sprintf("%d", $timeout));
@@ -4295,6 +4372,9 @@ sub DebuggingLibrary {
   if ($file =~ m|^/| && -f "/usr/lib/debug$file") {
     return "/usr/lib/debug$file";
   }
+  if ($file =~ m|^/| && -f "/usr/lib/debug$file.debug") {
+    return "/usr/lib/debug$file.debug";
+  }
   return undef;
 }
 
@@ -4737,6 +4817,12 @@ sub MapToSymbols {
 
   my $debug = 0;
 
+  # For libc (and other) libraries, the copy in /usr/lib/debug contains debugging symbols
+  my $debugging = DebuggingLibrary($image);
+  if ($debugging) {
+    $image = $debugging;
+  }
+
   # Ignore empty binaries
   if ($#{$pclist} < 0) { return; }
 
@@ -4790,7 +4876,7 @@ sub MapToSymbols {
   if ($debug) {
     print("----\n");
     system("cat", $main::tmpfile_sym);
-    print("----\n");
+    print("---- $cmd ---\n");
     system("$cmd < " . ShellEscape($main::tmpfile_sym));
     print("----\n");
   }
@@ -5075,7 +5161,7 @@ sub cleanup {
     }
     print STDERR "If you want to investigate this profile further, you can do:\n";
     print STDERR "\n";
-    print STDERR "  pprof \\\n";
+    print STDERR "  $0 \\\n";
     print STDERR "    $main::prog \\\n";
     print STDERR "    $main::collected_profile\n";
     print STDERR "\n";

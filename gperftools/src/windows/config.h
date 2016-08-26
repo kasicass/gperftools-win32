@@ -15,6 +15,8 @@
 
 #ifndef GOOGLE_PERFTOOLS_WINDOWS_CONFIG_H_
 #define GOOGLE_PERFTOOLS_WINDOWS_CONFIG_H_
+/* used by tcmalloc.h */
+#define GPERFTOOLS_CONFIG_H_
 
 /* define this if you are linking tcmalloc statically and overriding the
  * default allocators.
@@ -24,7 +26,11 @@
 #undef WIN32_OVERRIDE_ALLOCATORS
 
 /* Define to 1 if your libc has a snprintf implementation */
+#if defined(_MSC_VER) && _MSC_VER >= 1900
+#define HAVE_SNPRINTF 1
+#else
 #undef HAVE_SNPRINTF
+#endif
 
 /* Define to 1 if compiler supports __builtin_stack_pointer */
 #undef HAVE_BUILTIN_STACK_POINTER
@@ -129,7 +135,11 @@
 #undef HAVE_SCHED_H
 
 /* Define to 1 if you have the <stdint.h> header file. */
+#if defined(_MSC_VER) && _MSC_VER >= 1900
+#define HAVE_STDINT_H 1
+#else
 #undef HAVE_STDINT_H
+#endif
 
 /* Define to 1 if you have the <stdlib.h> header file. */
 #define HAVE_STDLIB_H 1
@@ -220,13 +230,13 @@
 #define PACKAGE "gperftools"
 
 /* Define to the address where bug reports for this package should be sent. */
-#define PACKAGE_BUGREPORT "opensource@google.com"
+#define PACKAGE_BUGREPORT "gperftools@googlegroups.com"
 
 /* Define to the full name of this package. */
 #define PACKAGE_NAME "gperftools"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "gperftools 2.4"
+#define PACKAGE_STRING "gperftools 2.5"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "gperftools"
@@ -235,13 +245,10 @@
 #undef PACKAGE_URL
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "2.4"
+#define PACKAGE_VERSION "2.5"
 
 /* How to access the PC from a struct ucontext */
 #undef PC_FROM_UCONTEXT
-
-/* Prevent to export functions, as we use statical linking */
-#define PERFTOOLS_DLL_DECL
 
 /* Always the empty-string on non-windows systems. On windows, should be
    "__declspec(dllexport)". This way, when we compile the dll, we export our

@@ -49,6 +49,7 @@
 #include <algorithm>
 #include "base/logging.h"
 #include "base/spinlock.h"
+#include "maybe_emergency_malloc.h"
 #include "maybe_threads.h"
 #include "malloc_hook-inl.h"
 #include <gperftools/malloc_hook.h>
@@ -491,10 +492,16 @@ MallocHook_SbrkHook MallocHook_SetSbrkHook(MallocHook_SbrkHook hook) {
 
 
 void MallocHook::InvokeNewHookSlow(const void* p, size_t s) {
+  if (tcmalloc::IsEmergencyPtr(p)) {
+    return;
+  }
   INVOKE_HOOKS(NewHook, new_hooks_, (p, s));
 }
 
 void MallocHook::InvokeDeleteHookSlow(const void* p) {
+  if (tcmalloc::IsEmergencyPtr(p)) {
+    return;
+  }
   INVOKE_HOOKS(DeleteHook, delete_hooks_, (p));
 }
 
@@ -560,6 +567,8 @@ void MallocHook::InvokeSbrkHookSlow(const void* result, ptrdiff_t increment) {
 
 #undef INVOKE_HOOKS
 
+#ifndef NO_TCMALLOC_SAMPLES
+
 DEFINE_ATTRIBUTE_SECTION_VARS(google_malloc);
 DECLARE_ATTRIBUTE_SECTION_VARS(google_malloc);
   // actual functions are in debugallocation.cc or tcmalloc.cc
@@ -604,6 +613,8 @@ static inline void CheckInHookCaller() {
     checked_sections = true;
   }
 }
+
+#endif // !NO_TCMALLOC_SAMPLES
 
 // We can improve behavior/compactness of this function
 // if we pass a generic test function (with a generic arg)

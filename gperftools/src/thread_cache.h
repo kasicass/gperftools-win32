@@ -43,6 +43,7 @@
 #include <stdint.h>                     // for uint32_t, uint64_t
 #endif
 #include <sys/types.h>                  // for ssize_t
+#include "base/commandlineflags.h"
 #include "common.h"
 #include "linked_list.h"
 #include "maybe_threads.h"
@@ -56,6 +57,8 @@
 #include "page_heap_allocator.h"  // for PageHeapAllocator
 #include "sampler.h"           // for Sampler
 #include "static_vars.h"       // for Static
+
+DECLARE_int64(tcmalloc_sample_parameter);
 
 namespace tcmalloc {
 
@@ -105,8 +108,12 @@ class ThreadCache {
   static ThreadCache* GetCacheWhichMustBePresent();
   static ThreadCache* CreateCacheIfNecessary();
   static void         BecomeIdle();
+  static void         BecomeTemporarilyIdle();
   static size_t       MinSizeForSlowPath();
   static void         SetMinSizeForSlowPath(size_t size);
+  static void         SetUseEmergencyMalloc();
+  static void         ResetUseEmergencyMalloc();
+  static bool         IsUseEmergencyMalloc();
 
   static bool IsFastPathAllowed() { return MinSizeForSlowPath() != 0; }
 
@@ -268,6 +275,9 @@ class ThreadCache {
     // and we can then proceed, knowing that global and thread-local tcmalloc
     // state is initialized.
     size_t min_size_for_slow_path;
+
+    bool use_emergency_malloc;
+    size_t old_min_size_for_slow_path;
   };
   static __thread ThreadLocalData threadlocal_data_ ATTR_INITIAL_EXEC;
 #endif
@@ -342,7 +352,11 @@ inline int ThreadCache::HeapsInUse() {
 }
 
 inline bool ThreadCache::SampleAllocation(size_t k) {
-  return sampler_.SampleAllocation(k);
+#ifndef NO_TCMALLOC_SAMPLES
+  return UNLIKELY(FLAGS_tcmalloc_sample_parameter > 0) && sampler_.SampleAllocation(k);
+#else
+  return false;
+#endif
 }
 
 inline void* ThreadCache::Allocate(size_t size, size_t cl) {
@@ -350,7 +364,7 @@ inline void* ThreadCache::Allocate(size_t size, size_t cl) {
   ASSERT(size == Static::sizemap()->ByteSizeForClass(cl));
 
   FreeList* list = &list_[cl];
-  if (list->empty()) {
+  if (UNLIKELY(list->empty())) {
     return FetchFromCentralCache(cl, size);
   }
   size_ -= size;
@@ -374,7 +388,7 @@ inline void ThreadCache::Deallocate(void* ptr, size_t cl) {
   // There are two relatively uncommon things that require further work.
   // In the common case we're done, and in that case we need a single branch
   // because of the bitwise-or trick that follows.
-  if ((list_headroom | size_headroom) < 0) {
+  if (UNLIKELY((list_headroom | size_headroom) < 0)) {
     if (list_headroom < 0) {
       ListTooLong(list, cl);
     }
@@ -417,7 +431,9 @@ inline ThreadCache* ThreadCache::GetCache() {
 // because we may be in the thread destruction code and may have
 // already cleaned up the cache for this thread.
 inline ThreadCache* ThreadCache::GetCacheIfPresent() {
+#ifndef HAVE_TLS
   if (!tsd_inited_) return NULL;
+#endif
   return GetThreadHeap();
 }
 
@@ -434,6 +450,30 @@ inline void ThreadCache::SetMinSizeForSlowPath(size_t size) {
   threadlocal_data_.min_size_for_slow_path = size;
 #endif
 }
+
+inline void ThreadCache::SetUseEmergencyMalloc() {
+#ifdef HAVE_TLS
+  threadlocal_data_.old_min_size_for_slow_path = threadlocal_data_.min_size_for_slow_path;
+  threadlocal_data_.min_size_for_slow_path = 0;
+  threadlocal_data_.use_emergency_malloc = true;
+#endif
+}
+
+inline void ThreadCache::ResetUseEmergencyMalloc() {
+#ifdef HAVE_TLS
+  threadlocal_data_.min_size_for_slow_path = threadlocal_data_.old_min_size_for_slow_path;
+  threadlocal_data_.use_emergency_malloc = false;
+#endif
+}
+
+inline bool ThreadCache::IsUseEmergencyMalloc() {
+#if defined(HAVE_TLS) && defined(ENABLE_EMERGENCY_MALLOC)
+  return UNLIKELY(threadlocal_data_.use_emergency_malloc);
+#else
+  return false;
+#endif
+}
+
 
 }  // namespace tcmalloc
 

@@ -43,6 +43,7 @@
 #include "sampler.h"           // for Sampler
 #include "getenv_safe.h"       // TCMallocGetenvSafe
 #include "base/googleinit.h"
+#include "maybe_threads.h"
 
 namespace tcmalloc {
 
@@ -51,7 +52,6 @@ namespace tcmalloc {
 // sure the central_cache locks remain in a consisten state in the forked
 // version of the thread.
 
-static
 void CentralCacheLockAll()
 {
   Static::pageheap_lock()->Lock();
@@ -59,7 +59,6 @@ void CentralCacheLockAll()
     Static::central_cache()[i].Lock();
 }
 
-static
 void CentralCacheUnlockAll()
 {
   for (int i = 0; i < kNumClasses; ++i)
@@ -109,14 +108,15 @@ void Static::InitStaticVars() {
 }
 
 
-#if defined(HAVE_FORK) && defined(HAVE_PTHREAD)
+#if defined(HAVE_FORK) && defined(HAVE_PTHREAD) && !defined(__APPLE__)
 
 static inline
 void SetupAtForkLocksHandler()
 {
-  pthread_atfork(CentralCacheLockAll,    // parent calls before fork
-                 CentralCacheUnlockAll,  // parent calls after fork
-                 CentralCacheUnlockAll); // child calls after fork
+  perftools_pthread_atfork(
+    CentralCacheLockAll,    // parent calls before fork
+    CentralCacheUnlockAll,  // parent calls after fork
+    CentralCacheUnlockAll); // child calls after fork
 }
 REGISTER_MODULE_INITIALIZER(tcmalloc_fork_handler, SetupAtForkLocksHandler());
 

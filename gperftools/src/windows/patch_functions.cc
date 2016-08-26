@@ -101,6 +101,16 @@ const int kMaxModules = 8182;
 // These are hard-coded, unfortunately. :-( They are also probably
 // compiler specific.  See get_mangled_names.cc, in this directory,
 // for instructions on how to update these names for your compiler.
+#ifdef _WIN64
+const char kMangledNew[] = "??2@YAPEAX_K@Z";
+const char kMangledNewArray[] = "??_U@YAPEAX_K@Z";
+const char kMangledDelete[] = "??3@YAXPEAX@Z";
+const char kMangledDeleteArray[] = "??_V@YAXPEAX@Z";
+const char kMangledNewNothrow[] = "??2@YAPEAX_KAEBUnothrow_t@std@@@Z";
+const char kMangledNewArrayNothrow[] = "??_U@YAPEAX_KAEBUnothrow_t@std@@@Z";
+const char kMangledDeleteNothrow[] = "??3@YAXPEAXAEBUnothrow_t@std@@@Z";
+const char kMangledDeleteArrayNothrow[] = "??_V@YAXPEAXAEBUnothrow_t@std@@@Z";
+#else
 const char kMangledNew[] = "??2@YAPAXI@Z";
 const char kMangledNewArray[] = "??_U@YAPAXI@Z";
 const char kMangledDelete[] = "??3@YAXPAX@Z";
@@ -109,6 +119,7 @@ const char kMangledNewNothrow[] = "??2@YAPAXIABUnothrow_t@std@@@Z";
 const char kMangledNewArrayNothrow[] = "??_U@YAPAXIABUnothrow_t@std@@@Z";
 const char kMangledDeleteNothrow[] = "??3@YAXPAXABUnothrow_t@std@@@Z";
 const char kMangledDeleteArrayNothrow[] = "??_V@YAXPAXABUnothrow_t@std@@@Z";
+#endif
 
 // This is an unused but exported symbol that we can use to tell the
 // MSVC linker to bring in libtcmalloc, via the /INCLUDE linker flag.
@@ -333,16 +344,12 @@ class WindowsInfo {
   // TODO(csilvers): should we be patching GlobalAlloc/LocalAlloc instead,
   //                 for pre-XP systems?
   enum {
-//	kLocalAlloc, kLocalFree, 
-	kRtlAllocateHeap, kRtlFreeHeap,
-//    kHeapAlloc, kHeapFree,
-	kVirtualAllocEx, kVirtualFreeEx,
+    kHeapAlloc, kHeapFree, kVirtualAllocEx, kVirtualFreeEx,
     kMapViewOfFileEx, kUnmapViewOfFile, kLoadLibraryExW, kFreeLibrary,
     kNumFunctions
   };
 
   struct FunctionInfo {
-	const char* const module;        // like: kernel32.dll, ntdll.dll
     const char* const name;          // name of fn in a module (eg "malloc")
     GenericFnPtr windows_fn;         // the fn whose name we call (&malloc)
     GenericFnPtr origstub_fn;        // original fn contents after we patch
@@ -351,17 +358,11 @@ class WindowsInfo {
 
   static FunctionInfo function_info_[kNumFunctions];
 
-//  static HLOCAL WINAPI Perftools_LocalAlloc(UINT uFlags, SIZE_T uBytes);
-//  static HLOCAL WINAPI Perftools_LocalFree(HLOCAL hMem);
-
-  static PVOID WINAPI Perftools_RtlAllocateHeap(PVOID HeapHandle, ULONG Flags, SIZE_T Size);
-  static BOOLEAN WINAPI Perftools_RtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID HeapBase);
-
   // A Windows-API equivalent of malloc and free
-//  static LPVOID WINAPI Perftools_HeapAlloc(HANDLE hHeap, DWORD dwFlags,
-//                                           DWORD_PTR dwBytes);
-//  static BOOL WINAPI Perftools_HeapFree(HANDLE hHeap, DWORD dwFlags,
-//                                        LPVOID lpMem);
+  static LPVOID WINAPI Perftools_HeapAlloc(HANDLE hHeap, DWORD dwFlags,
+                                           DWORD_PTR dwBytes);
+  static BOOL WINAPI Perftools_HeapFree(HANDLE hHeap, DWORD dwFlags,
+                                        LPVOID lpMem);
   // A Windows-API equivalent of mmap and munmap, for "anonymous regions"
   static LPVOID WINAPI Perftools_VirtualAllocEx(HANDLE process, LPVOID address,
                                                 SIZE_T size, DWORD type,
@@ -474,18 +475,14 @@ const GenericFnPtr LibcInfoWithPatchFunctions<T>::perftools_fn_[] = {
 };
 
 /*static*/ WindowsInfo::FunctionInfo WindowsInfo::function_info_[] = {
-//  { "kernel32", "LocalAlloc", NULL, NULL, (GenericFnPtr)&Perftools_LocalAlloc },
-//  { "kernel32", "LocalFree", NULL, NULL, (GenericFnPtr)&Perftools_LocalFree },
-  { "ntdll", "RtlAllocateHeap", NULL, NULL, (GenericFnPtr)&Perftools_RtlAllocateHeap },
-  { "ntdll", "RtlFreeHeap", NULL, NULL, (GenericFnPtr)&Perftools_RtlFreeHeap },
-//  { "kernel32", "HeapAlloc", NULL, NULL, (GenericFnPtr)&Perftools_HeapAlloc },
-//  { "kernel32", "HeapFree", NULL, NULL, (GenericFnPtr)&Perftools_HeapFree },
-  { "kernel32", "VirtualAllocEx", NULL, NULL, (GenericFnPtr)&Perftools_VirtualAllocEx },
-  { "kernel32", "VirtualFreeEx", NULL, NULL, (GenericFnPtr)&Perftools_VirtualFreeEx },
-  { "kernel32", "MapViewOfFileEx", NULL, NULL, (GenericFnPtr)&Perftools_MapViewOfFileEx },
-  { "kernel32", "UnmapViewOfFile", NULL, NULL, (GenericFnPtr)&Perftools_UnmapViewOfFile },
-  { "kernel32", "LoadLibraryExW", NULL, NULL, (GenericFnPtr)&Perftools_LoadLibraryExW },
-  { "kernel32", "FreeLibrary", NULL, NULL, (GenericFnPtr)&Perftools_FreeLibrary },
+  { "HeapAlloc", NULL, NULL, (GenericFnPtr)&Perftools_HeapAlloc },
+  { "HeapFree", NULL, NULL, (GenericFnPtr)&Perftools_HeapFree },
+  { "VirtualAllocEx", NULL, NULL, (GenericFnPtr)&Perftools_VirtualAllocEx },
+  { "VirtualFreeEx", NULL, NULL, (GenericFnPtr)&Perftools_VirtualFreeEx },
+  { "MapViewOfFileEx", NULL, NULL, (GenericFnPtr)&Perftools_MapViewOfFileEx },
+  { "UnmapViewOfFile", NULL, NULL, (GenericFnPtr)&Perftools_UnmapViewOfFile },
+  { "LoadLibraryExW", NULL, NULL, (GenericFnPtr)&Perftools_LoadLibraryExW },
+  { "FreeLibrary", NULL, NULL, (GenericFnPtr)&Perftools_FreeLibrary },
 };
 
 bool LibcInfo::PopulateWindowsFn(const ModuleEntryCopy& module_entry) {
@@ -591,14 +588,12 @@ void LibcInfoWithPatchFunctions<T>::Unpatch() {
 }
 
 void WindowsInfo::Patch() {
-
+  HMODULE hkernel32 = ::GetModuleHandleA("kernel32");
+  CHECK_NE(hkernel32, NULL);
 
   // Unlike for libc, we know these exist in our module, so we can get
   // and patch at the same time.
   for (int i = 0; i < kNumFunctions; i++) {
-    HMODULE hkernel32 = ::GetModuleHandleA(function_info_[i].module);
-    CHECK_NE(hkernel32, NULL);
-
     function_info_[i].windows_fn = (GenericFnPtr)
         ::GetProcAddress(hkernel32, function_info_[i].name);
     // If origstub_fn is not NULL, it's left around from a previous
@@ -819,7 +814,7 @@ void LibcInfoWithPatchFunctions<T>::Perftools_free(void* ptr) __THROW {
   // allocated by tcmalloc.  Note it calls the origstub_free from
   // *this* templatized instance of LibcInfo.  See "template
   // trickiness" above.
-  do_free_with_callback(ptr, (void (*)(void*))origstub_fn_[kFree]);
+  do_free_with_callback(ptr, (void (*)(void*))origstub_fn_[kFree], false, 0);
 }
 
 template<int T>
@@ -833,7 +828,7 @@ void* LibcInfoWithPatchFunctions<T>::Perftools_realloc(
   if (new_size == 0) {
     MallocHook::InvokeDeleteHook(old_ptr);
     do_free_with_callback(old_ptr,
-                          (void (*)(void*))origstub_fn_[kFree]);
+                          (void (*)(void*))origstub_fn_[kFree], false, 0);
     return NULL;
   }
   return do_realloc_with_callback(
@@ -867,13 +862,13 @@ void* LibcInfoWithPatchFunctions<T>::Perftools_newarray(size_t size) {
 template<int T>
 void LibcInfoWithPatchFunctions<T>::Perftools_delete(void *p) {
   MallocHook::InvokeDeleteHook(p);
-  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree]);
+  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree], false, 0);
 }
 
 template<int T>
 void LibcInfoWithPatchFunctions<T>::Perftools_deletearray(void *p) {
   MallocHook::InvokeDeleteHook(p);
-  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree]);
+  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree], false, 0);
 }
 
 template<int T>
@@ -896,14 +891,14 @@ template<int T>
 void LibcInfoWithPatchFunctions<T>::Perftools_delete_nothrow(
     void *p, const std::nothrow_t&) __THROW {
   MallocHook::InvokeDeleteHook(p);
-  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree]);
+  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree], false, 0);
 }
 
 template<int T>
 void LibcInfoWithPatchFunctions<T>::Perftools_deletearray_nothrow(
     void *p, const std::nothrow_t&) __THROW {
   MallocHook::InvokeDeleteHook(p);
-  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree]);
+  do_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree], false, 0);
 }
 
 
@@ -928,41 +923,7 @@ void* LibcInfoWithPatchFunctions<T>::Perftools__expand(void *ptr,
                                                        size_t size) __THROW {
   return NULL;
 }
-/*
-HLOCAL WINAPI WindowsInfo::Perftools_LocalAlloc(UINT uFlags, SIZE_T uBytes)
-{
-  LPVOID result = ((HLOCAL (WINAPI *)(UINT, SIZE_T))
-                   function_info_[kLocalAlloc].origstub_fn)(
-                       uFlags, uBytes);
-  MallocHook::InvokeNewHook(result, uBytes);
-  return result;
-}
 
-HLOCAL WINAPI WindowsInfo::Perftools_LocalFree(HLOCAL hMem)
-{
-  MallocHook::InvokeDeleteHook(hMem);
-  return ((HLOCAL (WINAPI *)(HLOCAL))
-          function_info_[kLocalFree].origstub_fn)(
-              hMem);
-}
-*/
-PVOID WINAPI WindowsInfo::Perftools_RtlAllocateHeap(PVOID HeapHandle, ULONG Flags, SIZE_T Size)
-{
-  LPVOID result = ((PVOID (WINAPI *)(PVOID, ULONG, SIZE_T))
-					function_info_[kRtlAllocateHeap].origstub_fn)(
-                       HeapHandle, Flags, Size);
-  MallocHook::InvokeNewHook(result, Size);
-  return result;
-}
-
-BOOLEAN WINAPI WindowsInfo::Perftools_RtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID HeapBase)
-{
-  MallocHook::InvokeDeleteHook(HeapBase);
-  return ((BOOLEAN (WINAPI *)(PVOID, ULONG, PVOID))
-			function_info_[kRtlFreeHeap].origstub_fn)(
-              HeapHandle, Flags, HeapBase);
-}
-/*
 LPVOID WINAPI WindowsInfo::Perftools_HeapAlloc(HANDLE hHeap, DWORD dwFlags,
                                                DWORD_PTR dwBytes) {
   LPVOID result = ((LPVOID (WINAPI *)(HANDLE, DWORD, DWORD_PTR))
@@ -979,7 +940,7 @@ BOOL WINAPI WindowsInfo::Perftools_HeapFree(HANDLE hHeap, DWORD dwFlags,
           function_info_[kHeapFree].origstub_fn)(
               hHeap, dwFlags, lpMem);
 }
-*/
+
 LPVOID WINAPI WindowsInfo::Perftools_VirtualAllocEx(HANDLE process,
                                                     LPVOID address,
                                                     SIZE_T size, DWORD type,

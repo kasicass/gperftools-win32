@@ -48,6 +48,9 @@ endif GCC
 if HAVE_W_NO_UNUSED_RESULT
 AM_CXXFLAGS += -Wno-unused-result
 endif HAVE_W_NO_UNUSED_RESULT
+if HAVE_SIZED_DEALLOCATION
+AM_CXXFLAGS += -fsized-deallocation
+endif HAVE_SIZED_DEALLOCATION
 
 # The -no-undefined flag allows libtool to generate shared libraries for
 # Cygwin and MinGW.  LIBSTDCXX_LA_LINKER_FLAG is used to fix a Solaris bug.
@@ -133,7 +136,6 @@ googleinclude_HEADERS =				\
    src/google/stacktrace.h			\
    src/google/tcmalloc.h
 
-docdir = $(prefix)/share/doc/$(PACKAGE)-$(VERSION)
 # This is for HTML and other documentation you want to install.
 # Add your documentation files (in doc/) in addition to these
 # top-level boilerplate files.  Also add a TODO file if you have one.
@@ -196,7 +198,6 @@ SYSINFO_INCLUDES = src/base/sysinfo.h \
                    src/getenv_safe.h \
                    src/base/logging.h \
                    src/base/commandlineflags.h \
-                   src/base/cycleclock.h \
                    src/base/arm_instruction_set_select.h \
                    src/base/basictypes.h
 noinst_LTLIBRARIES += libsysinfo.la
@@ -239,7 +240,6 @@ SPINLOCK_INCLUDES = src/base/spinlock.h \
                     src/base/spinlock_win32-inl.h \
                     src/base/spinlock_linux-inl.h \
                     src/base/spinlock_posix-inl.h \
-                    src/base/synchronization_profiling.h \
                     src/base/atomicops-internals-macosx.h \
                     src/base/atomicops-internals-linuxppc.h \
                     src/base/atomicops-internals-arm-generic.h \
@@ -350,6 +350,7 @@ if WITH_STACK_TRACE
 ### The header files we use.  We divide into categories based on directory
 S_STACKTRACE_INCLUDES = src/stacktrace_impl_setup-inl.h \
                         src/stacktrace_generic-inl.h \
+                        src/stacktrace_libgcc-inl.h \
 			src/stacktrace_libunwind-inl.h \
 			src/stacktrace_arm-inl.h \
 			src/stacktrace_powerpc-inl.h \
@@ -375,6 +376,9 @@ libstacktrace_la_LIBADD = $(UNWIND_LIBS) $(LIBSPINLOCK)
 STACKTRACE_SYMBOLS = '(GetStackTrace|GetStackFrames|GetStackTraceWithContext|GetStackFramesWithContext)'
 libstacktrace_la_LDFLAGS = -export-symbols-regex $(STACKTRACE_SYMBOLS) $(AM_LDFLAGS)
 
+noinst_LTLIBRARIES += libfake_stacktrace_scope.la
+libfake_stacktrace_scope_la_SOURCES = src/fake_stacktrace_scope.cc
+
 ### Unittests
 TESTS += stacktrace_unittest
 STACKTRACE_UNITTEST_INCLUDES = src/config_for_unittests.h \
@@ -383,7 +387,7 @@ STACKTRACE_UNITTEST_INCLUDES = src/config_for_unittests.h \
                                $(LOGGING_INCLUDES)
 stacktrace_unittest_SOURCES = src/tests/stacktrace_unittest.cc \
                               $(STACKTRACE_UNITTEST_INCLUDES)
-stacktrace_unittest_LDADD = libstacktrace.la liblogging.la
+stacktrace_unittest_LDADD = libstacktrace.la liblogging.la libfake_stacktrace_scope.la
 
 ### Documentation
 dist_doc_DATA +=
@@ -482,10 +486,10 @@ libtcmalloc_minimal_internal_la_SOURCES = src/common.cc \
 # We #define NO_TCMALLOC_SAMPLES, since sampling is turned off for _minimal.
 libtcmalloc_minimal_internal_la_CXXFLAGS = -DNO_TCMALLOC_SAMPLES \
                                            -DNO_HEAP_CHECK \
-                                           $(PTHREAD_CFLAGS) -DNDEBUG \
+                                           -DNDEBUG \
                                            $(AM_CXXFLAGS) $(NO_EXCEPTIONS)
-libtcmalloc_minimal_internal_la_LDFLAGS = $(PTHREAD_CFLAGS) $(AM_LDFLAGS)
-libtcmalloc_minimal_internal_la_LIBADD = $(PTHREAD_LIBS) $(LIBSPINLOCK) libmaybe_threads.la
+libtcmalloc_minimal_internal_la_LDFLAGS =  $(AM_LDFLAGS)
+libtcmalloc_minimal_internal_la_LIBADD =  $(LIBSPINLOCK) libmaybe_threads.la
 
 lib_LTLIBRARIES += libtcmalloc_minimal.la
 WINDOWS_PROJECTS += vsprojects/libtcmalloc_minimal/libtcmalloc_minimal.vcproj
@@ -493,8 +497,8 @@ libtcmalloc_minimal_la_SOURCES = $(TCMALLOC_CC) $(TCMALLOC_MINIMAL_INCLUDES)
 libtcmalloc_minimal_la_CXXFLAGS = -DNO_TCMALLOC_SAMPLES \
                                   $(PTHREAD_CFLAGS) -DNDEBUG $(AM_CXXFLAGS)
 # -version-info gets passed to libtool
-libtcmalloc_minimal_la_LDFLAGS = $(PTHREAD_CFLAGS) -version-info @TCMALLOC_SO_VERSION@ $(AM_LDFLAGS)
-libtcmalloc_minimal_la_LIBADD = libtcmalloc_minimal_internal.la $(PTHREAD_LIBS)
+libtcmalloc_minimal_la_LDFLAGS = -version-info @TCMALLOC_SO_VERSION@ $(AM_LDFLAGS)
+libtcmalloc_minimal_la_LIBADD = libtcmalloc_minimal_internal.la
 
 # For windows, we're playing around with trying to do some stacktrace
 # support even with libtcmalloc_minimal.  For everyone else, though,
@@ -847,6 +851,40 @@ endif WITH_STACK_TRACE
 
 endif WITH_DEBUGALLOC
 
+if !MINGW
+noinst_LTLIBRARIES += librun_benchmark.la
+librun_benchmark_la_SOURCES = \
+	benchmark/run_benchmark.c benchmark/run_benchmark.h
+
+noinst_PROGRAMS += malloc_bench malloc_bench_shared \
+	malloc_bench_shared_full \
+	binary_trees binary_trees_shared
+
+malloc_bench_SOURCES = benchmark/malloc_bench.cc
+malloc_bench_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS) $(NO_BUILTIN_CXXFLAGS)
+malloc_bench_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS) -static
+malloc_bench_LDADD = librun_benchmark.la libtcmalloc_minimal.la $(PTHREAD_LIBS)
+
+malloc_bench_shared_SOURCES = benchmark/malloc_bench.cc
+malloc_bench_shared_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS) $(NO_BUILTIN_CXXFLAGS)
+malloc_bench_shared_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
+malloc_bench_shared_LDADD = librun_benchmark.la libtcmalloc_minimal.la $(PTHREAD_LIBS)
+
+malloc_bench_shared_full_SOURCES = benchmark/malloc_bench.cc
+malloc_bench_shared_full_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS) $(NO_BUILTIN_CXXFLAGS)
+malloc_bench_shared_full_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
+malloc_bench_shared_full_LDADD = librun_benchmark.la libtcmalloc.la $(PTHREAD_LIBS)
+
+binary_trees_SOURCES = benchmark/binary_trees.cc
+binary_trees_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS) $(NO_BUILTIN_CXXFLAGS)
+binary_trees_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS) -static
+binary_trees_LDADD = libtcmalloc_minimal.la $(PTHREAD_LIBS)
+
+binary_trees_shared_SOURCES = benchmark/binary_trees.cc
+binary_trees_shared_CXXFLAGS = $(PTHREAD_CFLAGS) $(AM_CXXFLAGS) $(NO_BUILTIN_CXXFLAGS)
+binary_trees_shared_LDFLAGS = $(PTHREAD_CFLAGS) $(TCMALLOC_FLAGS)
+binary_trees_shared_LDADD = libtcmalloc_minimal.la $(PTHREAD_LIBS)
+endif !MINGW
 
 ### ------- tcmalloc (thread-caching malloc + heap profiler + heap checker)
 
@@ -865,12 +903,23 @@ S_TCMALLOC_INCLUDES = $(S_TCMALLOC_MINIMAL_INCLUDES) \
                       src/base/sysinfo.h \
                       src/base/thread_lister.h \
                       src/heap-profile-table.h \
-                      src/heap-profile-stats.h
+                      src/heap-profile-stats.h \
+                      src/maybe_emergency_malloc.h \
+                      src/emergency_malloc.h
+
 SG_TCMALLOC_INCLUDES = src/gperftools/heap-profiler.h \
                        src/gperftools/heap-checker.h
 TCMALLOC_INCLUDES = $(S_TCMALLOC_INCLUDES) $(SG_TCMALLOC_MINIMAL_INCLUDES) \
 		    $(SG_TCMALLOC_INCLUDES) $(SG_STACKTRACE_INCLUDES)
 perftoolsinclude_HEADERS += $(SG_TCMALLOC_INCLUDES)
+
+if BUILD_EMERGENCY_MALLOC
+EMERGENCY_MALLOC_CC = src/emergency_malloc.cc src/emergency_malloc_for_stacktrace.cc
+EMERGENCY_MALLOC_DEFINE = -DENABLE_EMERGENCY_MALLOC
+else !BUILD_EMERGENCY_MALLOC
+EMERGENCY_MALLOC_CC = src/fake_stacktrace_scope.cc
+EMERGENCY_MALLOC_DEFINE =
+endif !BUILD_EMERGENCY_MALLOC
 
 ### Making the library
 
@@ -885,15 +934,16 @@ libtcmalloc_internal_la_SOURCES = $(libtcmalloc_minimal_internal_la_SOURCES) \
                                   src/heap-profile-table.cc \
                                   src/heap-profiler.cc \
                                   src/raw_printer.cc \
+                                  $(EMERGENCY_MALLOC_CC) \
                                   src/memory_region_map.cc
 libtcmalloc_internal_la_CXXFLAGS = $(PTHREAD_CFLAGS) -DNDEBUG \
-                                   $(AM_CXXFLAGS) $(NO_EXCEPTIONS)
+                                   $(AM_CXXFLAGS) $(NO_EXCEPTIONS) $(EMERGENCY_MALLOC_DEFINE)
 libtcmalloc_internal_la_LDFLAGS = $(PTHREAD_CFLAGS)
 libtcmalloc_internal_la_LIBADD = libstacktrace.la $(PTHREAD_LIBS)
 
 lib_LTLIBRARIES += libtcmalloc.la
 libtcmalloc_la_SOURCES = $(TCMALLOC_CC) $(TCMALLOC_INCLUDES)
-libtcmalloc_la_CXXFLAGS = $(PTHREAD_CFLAGS) -DNDEBUG $(AM_CXXFLAGS)
+libtcmalloc_la_CXXFLAGS = $(PTHREAD_CFLAGS) -DNDEBUG $(AM_CXXFLAGS) $(EMERGENCY_MALLOC_DEFINE)
 libtcmalloc_la_LDFLAGS = $(PTHREAD_CFLAGS) -version-info @TCMALLOC_SO_VERSION@
 libtcmalloc_la_LIBADD = libtcmalloc_internal.la libmaybe_threads.la $(PTHREAD_LIBS)
 
@@ -1235,7 +1285,7 @@ libprofiler_la_SOURCES = src/profiler.cc \
                          src/profile-handler.cc \
                          src/profiledata.cc \
                          $(CPU_PROFILER_INCLUDES)
-libprofiler_la_LIBADD = libstacktrace.la libmaybe_threads.la
+libprofiler_la_LIBADD = libstacktrace.la libmaybe_threads.la libfake_stacktrace_scope.la
 # We have to include ProfileData for profiledata_unittest
 CPU_PROFILER_SYMBOLS = '(ProfilerStart|ProfilerStartWithOptions|ProfilerStop|ProfilerFlush|ProfilerEnable|ProfilerDisable|ProfilingIsEnabledForAllThreads|ProfilerRegisterThread|ProfilerGetCurrentState|ProfilerState|ProfileData|ProfileHandler)'
 libprofiler_la_LDFLAGS = -export-symbols-regex $(CPU_PROFILER_SYMBOLS) \

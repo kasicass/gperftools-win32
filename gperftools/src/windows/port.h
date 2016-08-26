@@ -64,6 +64,11 @@
 #include <assert.h>
 #include <stdlib.h>          /* for rand, srand, _strtoxxx */
 
+#if defined(_MSC_VER) && _MSC_VER >= 1900
+#define _TIMESPEC_DEFINED
+#include <time.h>
+#endif
+
 /*
  * 4018: signed/unsigned mismatch is common (and ok for signed_i < unsigned_i)
  * 4244: otherwise we get problems when subtracting two size_t's to an int
@@ -456,7 +461,7 @@ inline int nanosleep(const struct timespec *req, struct timespec *rem) {
 #endif
 
 #ifndef __MINGW32__
-#if _MSC_VER < 1800
+#if defined(_MSC_VER) && _MSC_VER < 1800
 inline long long int strtoll(const char *nptr, char **endptr, int base) {
     return _strtoi64(nptr, endptr, base);
 }

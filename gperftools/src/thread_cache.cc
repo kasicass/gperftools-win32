@@ -205,7 +205,6 @@ void ThreadCache::Scavenge() {
   // that situation by dropping L/2 nodes from the free list.  This
   // may not release much memory, but if so we will call scavenge again
   // pretty soon and the low-water marks will be high on that call.
-  //int64 start = CycleClock::Now();
   for (int cl = 0; cl < kNumClasses; cl++) {
     FreeList* list = &list_[cl];
     const int lowmark = list->lowwatermark();
@@ -395,6 +394,12 @@ void ThreadCache::BecomeIdle() {
 
   // We can now get rid of the heap
   DeleteCache(heap);
+}
+
+void ThreadCache::BecomeTemporarilyIdle() {
+  ThreadCache* heap = GetCacheIfPresent();
+  if (heap)
+    heap->Cleanup();
 }
 
 void ThreadCache::DestroyThreadCache(void* ptr) {
