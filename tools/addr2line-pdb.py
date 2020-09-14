@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
 	symopts = DbgHelp.SYMOPT_DEFERRED_LOADS | DbgHelp.SYMOPT_DEBUG | DbgHelp.SYMOPT_LOAD_LINES
 	if args.demangle:
-		symopts |= DbgHelp.SYMOPT_UNDNAME;
+		symopts |= DbgHelp.SYMOPT_UNDNAME
 
 	hProcess = windll.kernel32.GetCurrentProcess()
 	if not DbgHelp.SymInitialize(hProcess, None, False):

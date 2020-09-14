@@ -8,7 +8,7 @@ import HeapProfileAddressTable
 
 if __name__ == '__main__':
 	ap = argparse.ArgumentParser(description='Print callstacks that liveBytes >= LIMIT Mb')
-	ap.add_argument('-l', '--limit', dest='limit', type=float, default=1, help='> LIMIT Mb to print')
+	ap.add_argument('-l', '--limit', dest='limit', type=float, default=0.1, help='> LIMIT Mb to print')
 	ap.add_argument('filename', help='.heap file to parse')
 	args = ap.parse_args()
 
@@ -29,6 +29,7 @@ if __name__ == '__main__':
 	at = HeapProfileAddressTable.HeapProfileAddressTable(parser)
 	at.buildTable()
 
+	sumLiveBytes = 0
 	result = [] # (liveCount, liveBytes, sumCount, sumBytes, callstack)
 	for countInfo, stackInfo in parser.addressInfo:
 		callstack = []
@@ -36,6 +37,10 @@ if __name__ == '__main__':
 			name = at.addr2name(addr)
 			callstack.append('%s(%s:%d)' %(name[0], name[1], name[2]))
 		result.append((countInfo[0], countInfo[1], countInfo[2], countInfo[3], callstack))
+		sumLiveBytes += countInfo[1]
+
+	print 'All liveBytes: %.2f Mb' % (sumLiveBytes/(1024.0*1024.0))
+	print
 
 	for v in result:
 		print 'liveCount: %d, liveBytes: %.2f Mb, sumCount: %d, sumBytes: %.2f Mb' % (v[0], v[1]/(1024.0*1024.0), v[2], v[3]/(1024.0*1024.0))
