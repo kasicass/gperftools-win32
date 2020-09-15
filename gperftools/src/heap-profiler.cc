@@ -168,7 +168,6 @@ static char* global_profiler_buffer = NULL;
 // Access to all of these is protected by heap_lock.
 static bool  is_on = false;           // If are on as a subsytem.
 static bool  dumping = false;         // Dumping status to prevent recursion
-static bool  recording_alloc = false;
 static char* filename_prefix = NULL;  // Prefix used for profile file names
                                       // (NULL if no need for dumping yet)
 static int   dump_count = 0;          // How many dumps so far
@@ -273,7 +272,7 @@ static void MaybeDumpProfileLocked() {
     const int64 inuse_bytes = total.alloc_size - total.free_size;
     bool need_to_dump = false;
     char buf[128];
-    int64 current_time = time(NULL);
+
     if (FLAGS_heap_profile_allocation_interval > 0 &&
         total.alloc_size >=
         last_dump_alloc + FLAGS_heap_profile_allocation_interval) {
@@ -294,13 +293,15 @@ static void MaybeDumpProfileLocked() {
       snprintf(buf, sizeof(buf), "%" PRId64 " MB currently in use",
                inuse_bytes >> 20);
       need_to_dump = true;
-    } else if (FLAGS_heap_profile_time_interval > 0 &&
-               current_time - last_dump_time >=
-               FLAGS_heap_profile_time_interval) {
-      snprintf(buf, sizeof(buf), "%" PRId64 " sec since the last dump",
-               current_time - last_dump_time);
-      need_to_dump = true;
-      last_dump_time = current_time;
+    } else if (FLAGS_heap_profile_time_interval > 0 ) {
+      int64 current_time = time(NULL);
+      if (current_time - last_dump_time >=
+          FLAGS_heap_profile_time_interval) {
+        snprintf(buf, sizeof(buf), "%" PRId64 " sec since the last dump",
+                 current_time - last_dump_time);
+        need_to_dump = true;
+        last_dump_time = current_time;
+      }
     }
     if (need_to_dump) {
       DumpProfileLocked(buf);
@@ -340,24 +341,12 @@ static void RecordFree(const void* ptr) {
 
 // static
 void NewHook(const void* ptr, size_t size) {
-  if (dumping) return;
-  if (ptr != NULL && !recording_alloc)
-  {
-    recording_alloc = true;
-    RecordAlloc(ptr, size, 0);
-	recording_alloc = false;
-  }
+  if (ptr != NULL) RecordAlloc(ptr, size, 0);
 }
 
 // static
 void DeleteHook(const void* ptr) {
-  if (dumping) return;
-  if (ptr != NULL && !recording_alloc)
-  {
-    recording_alloc = true;
-    RecordFree(ptr);
-	recording_alloc = false;
-  }
+  if (ptr != NULL) RecordFree(ptr);
 }
 
 // TODO(jandrews): Re-enable stack tracing

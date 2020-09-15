@@ -204,7 +204,7 @@ Output type:
    --disasm=<regexp>   Generate disassembly of matching routines
    --symbols           Print demangled symbol names found at given addresses
    --dot               Generate DOT file to stdout
-   --ps                Generate Postcript to stdout
+   --ps                Generate Postscript to stdout
    --pdf               Generate PDF to stdout
    --svg               Generate SVG to stdout
    --gif               Generate GIF to stdout
@@ -4511,7 +4511,6 @@ sub ParseLibraries {
   my $zero_offset = HexExtend("0");
 
   my $buildvar = "";
-  my $priorlib = "";
   foreach my $l (split("\n", $map)) {
     if ($l =~ m/^\s*build=(.*)$/) {
       $buildvar = $1;
@@ -4521,7 +4520,7 @@ sub ParseLibraries {
     my $finish;
     my $offset;
     my $lib;
-    if ($l =~ /^($h)-($h)\s+..x.\s+($h)\s+\S+:\S+\s+\d+\s+(.+\.(so|dll|dylib|bundle)((\.\d+)+\w*(\.\d+){0,3})?)$/i) {
+    if ($l =~ /^($h)-($h)\s+..x.\s+($h)\s+\S+:\S+\s+\d+\s+(.+\.(so|dll|dylib|bundle|node)((\.\d+)+\w*(\.\d+){0,3})?)$/i) {
       # Full line from /proc/self/maps.  Example:
       #   40000000-40015000 r-xp 00000000 03:01 12845071   /lib/ld-2.3.2.so
       $start = HexExtend($1);
@@ -4568,16 +4567,7 @@ sub ParseLibraries {
       }
     }
 
-    # If we find multiple executable segments for a single library, merge them
-    # into a single entry that spans the complete address range.
-    if ($lib eq $priorlib) {
-      my $prior = pop(@{$result});
-      $start = @$prior[1];
-      # TODO $offset may be wrong if .text is not in the final segment.
-    }
-
     push(@{$result}, [$lib, $start, $finish, $offset]);
-    $priorlib = $lib;
   }
 
   # Append special entry for additional library (not relocated)
@@ -5332,7 +5322,7 @@ sub GetProcedureBoundaries {
   my $demangle_flag = "";
   my $cppfilt_flag = "";
   my $to_devnull = ">$dev_null 2>&1";
-  if (system(ShellEscape($nm, "--demangle", "image") . $to_devnull) == 0) {
+  if (system(ShellEscape($nm, "--demangle", $image) . $to_devnull) == 0) {
     # In this mode, we do "nm --demangle <foo>"
     $demangle_flag = "--demangle";
     $cppfilt_flag = "";

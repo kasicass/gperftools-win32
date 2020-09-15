@@ -62,6 +62,14 @@
 # define MAP_ANONYMOUS MAP_ANON
 #endif
 
+// Linux added support for MADV_FREE in 4.5 but we aren't ready to use it
+// yet. Among other things, using compile-time detection leads to poor
+// results when compiling on a system with MADV_FREE and running on a
+// system without it. See https://github.com/gperftools/gperftools/issues/780.
+#if defined(__linux__) && defined(MADV_FREE) && !defined(TCMALLOC_USE_MADV_FREE)
+# undef MADV_FREE
+#endif
+
 // MADV_FREE is specifically designed for use by malloc(), but only
 // FreeBSD supports it; in linux we fall back to the somewhat inferior
 // MADV_DONTNEED.
@@ -88,20 +96,14 @@ static const bool kDebugMode = true;
 using tcmalloc::kLog;
 using tcmalloc::Log;
 
-// Anonymous namespace to avoid name conflicts on "CheckAddressBits".
-namespace {
-
 // Check that no bit is set at position ADDRESS_BITS or higher.
-template <int ADDRESS_BITS> bool CheckAddressBits(uintptr_t ptr) {
-  return (ptr >> ADDRESS_BITS) == 0;
+static bool CheckAddressBits(uintptr_t ptr) {
+  bool always_ok = (kAddressBits == 8 * sizeof(void*));
+  // this is a bit insane but otherwise we get compiler warning about
+  // shifting right by word size even if this code is dead :(
+  int shift_bits = always_ok ? 0 : kAddressBits;
+  return always_ok || ((ptr >> shift_bits) == 0);
 }
-
-// Specialize for the bit width of a pointer to avoid undefined shift.
-template <> bool CheckAddressBits<8 * sizeof(void*)>(uintptr_t ptr) {
-  return true;
-}
-
-}  // Anonymous namespace to avoid name conflicts on "CheckAddressBits".
 
 COMPILE_ASSERT(kAddressBits <= 8 * sizeof(void*),
                address_bits_larger_than_pointer_size);
@@ -114,7 +116,7 @@ static size_t pagesize = 0;
 #endif
 
 // The current system allocator
-SysAllocator* sys_alloc = NULL;
+SysAllocator* tcmalloc_sys_alloc = NULL;
 
 // Number of bytes taken from system.
 size_t TCMalloc_SystemTaken = 0;
@@ -476,7 +478,7 @@ void InitSystemAllocators(void) {
     sdef->SetChildAllocator(mmap, 1, mmap_name);
   }
 
-  sys_alloc = tc_get_sysalloc_override(sdef);
+  tcmalloc_sys_alloc = tc_get_sysalloc_override(sdef);
 }
 
 void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
@@ -499,11 +501,10 @@ void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
     actual_size = &actual_size_storage;
   }
 
-  void* result = sys_alloc->Alloc(size, actual_size, alignment);
+  void* result = tcmalloc_sys_alloc->Alloc(size, actual_size, alignment);
   if (result != NULL) {
     CHECK_CONDITION(
-      CheckAddressBits<kAddressBits>(
-        reinterpret_cast<uintptr_t>(result) + *actual_size - 1));
+      CheckAddressBits(reinterpret_cast<uintptr_t>(result) + *actual_size - 1));
     TCMalloc_SystemTaken += *actual_size;
   }
   return result;
