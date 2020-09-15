@@ -51,7 +51,7 @@ int main()
 //	GlobalFree(ptr);
 //	HeapProfilerDump("Try4");
 
-	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
+//	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
 	return 0;
 }
 
