@@ -256,4 +256,16 @@ RawFD RawOpenForWriting(const char* filename);   // uses default permissions
 void RawWrite(RawFD fd, const char* buf, size_t len);
 void RawClose(RawFD fd);
 
+#define FAT_LOGGING_ASYNCIO
+#if defined(FAT_LOGGING_ASYNCIO)
+
+namespace Fat { namespace AsyncIO {
+
+void Init();
+void Shutdown();
+
+}}
+
+#endif
+
 #endif // _LOGGING_H_

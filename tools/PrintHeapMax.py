@@ -7,8 +7,8 @@ import HeapProfileParser
 import HeapProfileAddressTable
 
 if __name__ == '__main__':
-	ap = argparse.ArgumentParser(description='Print callstacks that liveBytes >= LIMIT Mb')
-	ap.add_argument('-l', '--limit', dest='limit', type=float, default=0.1, help='> LIMIT Mb to print')
+	ap = argparse.ArgumentParser(description='Print callstacks that liveBytes >= LIMIT Bytes')
+	ap.add_argument('-l', '--limit', dest='limit', type=float, default=0.1, help='> LIMIT Bytes to print')
 	ap.add_argument('filename', help='.heap file to parse')
 	args = ap.parse_args()
 
@@ -17,7 +17,8 @@ if __name__ == '__main__':
 
 	# filter "liveBytes >= LIMIT Mb"
 	addressInfo = []
-	args.limit  = args.limit*1024*1024
+	# args.limit  = args.limit*1024*1024
+	args.limit  = args.limit
 	for countInfo, stackInfo in parser.addressInfo:
 		if countInfo[1] >= args.limit:
 			addressInfo.append((countInfo, stackInfo))
@@ -44,7 +45,20 @@ if __name__ == '__main__':
 
 	for v in result:
 		print 'liveCount: %d, liveBytes: %.2f Mb, sumCount: %d, sumBytes: %.2f Mb' % (v[0], v[1]/(1024.0*1024.0), v[2], v[3]/(1024.0*1024.0))
+		startPrint = False
 		for line in v[4]:
+			if '::Perftools_' in line:
+				startPrint = True
+				continue
+
+			if not startPrint:  # strip tcmalloc callstack
+				continue
+
 			print '  ', line
+
+		if not startPrint:      # not find '::Perftools_'? print all
+			for line in v[4]:
+				print '  ', line
+
 		print
 

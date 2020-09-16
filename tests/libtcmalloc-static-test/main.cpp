@@ -5,6 +5,13 @@ extern "C" void HeapProfilerStart(const char* prefix);
 extern "C" void HeapProfilerDump(const char *reason);
 extern "C" void HeapProfilerStop();
 
+namespace Fat { namespace AsyncIO {
+
+void Init();
+void Shutdown();
+
+}}
+
 void *mallocMe(unsigned int n)
 {
 	return malloc(n);
@@ -12,7 +19,10 @@ void *mallocMe(unsigned int n)
 
 int main()
 {
+	Fat::AsyncIO::Init();
 	HeapProfilerStart("D:\\heap");
+
+	::Sleep(1000);
 
 	//printf("begin\n");
 	char *p = new char[1024];
@@ -20,6 +30,8 @@ int main()
 	HeapProfilerDump("Try1");
 	delete[] p;
 	//printf("end\n");
+
+	::Sleep(1000);
 
 	const int N = 3;
 	void *pv[N] = {0};
@@ -30,6 +42,8 @@ int main()
 	
 	HeapProfilerDump("Try2");
 
+	::Sleep(1000);
+
 	for (int i = 0; i < N; ++i)
 	{
 		free(pv[i]);
@@ -38,6 +52,9 @@ int main()
 
 	HLOCAL localPtr = LocalAlloc(LMEM_MOVEABLE, 1024);
 	HeapProfilerDump("Try3");
+
+	::Sleep(1000);
+
 	LocalFree(localPtr);
 	HeapProfilerDump("Try4");
 
@@ -51,7 +68,10 @@ int main()
 //	GlobalFree(ptr);
 //	HeapProfilerDump("Try4");
 
-//	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
+	::Sleep(1000);
+
+	Fat::AsyncIO::Shutdown();
+	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
 	return 0;
 }
 

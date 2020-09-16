@@ -39,6 +39,230 @@ DEFINE_int32(verbose, EnvToInt("PERFTOOLS_VERBOSE", 0),
              "Set to numbers >0 for more verbose output, or <0 for less.  "
              "--verbose == -4 means we log fatal errors only.");
 
+#if defined(FAT_LOGGING_ASYNCIO)
+
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <assert.h>
+
+namespace Fat { namespace AsyncIO {
+
+template <typename T, int MAX_ITEMS>
+class threadsafe_queue
+{
+public:
+	threadsafe_queue() :
+		read_(0),
+		write_(0)
+	{
+
+	}
+
+	threadsafe_queue(const threadsafe_queue& rhs) = delete;
+	threadsafe_queue& operator=(const threadsafe_queue&) = delete;
+
+	void push(T new_value)
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		data_queue_[write_++] = new_value;
+		write_ = write_ % MAX_ITEMS;
+		cond_.notify_one();
+	}
+
+	bool try_pop(T& value)
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		if (data_queue_empty())
+			return false;
+		value = data_queue_[read_++];
+		read_ = read_ % MAX_ITEMS;
+		return true;
+	}
+
+	void wait_and_pop(T& value)
+	{
+		std::unique_lock<std::mutex> lock(mutex_);
+		cond_.wait(lock, [this] { return !data_queue_empty(); });
+		value = data_queue_[read_++];
+		read_ = read_ % MAX_ITEMS;
+	}
+
+	bool empty() const
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		return data_queue_empty();
+	}
+
+protected:
+	bool data_queue_empty() const
+	{
+		return (read_ == write_);
+	}
+
+private:
+	mutable std::mutex mutex_;
+	std::condition_variable cond_;
+	T data_queue_[MAX_ITEMS];
+	int read_;
+	int write_;
+};
+
+struct MyCmd
+{
+	enum { OP_WRITE = 0, OP_QUIT };
+	int op;
+	char* filename;
+	void* data;
+	size_t length;
+};
+typedef threadsafe_queue<MyCmd, 8> MyQueue;
+
+class MyThreadEntry
+{
+public:
+	MyThreadEntry(MyQueue& que) : que_(que) {}
+
+	void WriteToFile(MyCmd& cmd)
+	{
+		FILE *fp = fopen(cmd.filename, "wb");
+		if (fp == NULL)
+			return;
+
+		fwrite(cmd.data, cmd.length, 1, fp);
+		fclose(fp);
+	}
+
+	void operator()()
+	{
+		bool running = true;
+		MyCmd cmd;
+		while (running)
+		{
+			que_.wait_and_pop(cmd);
+			switch (cmd.op)
+			{
+			case MyCmd::OP_WRITE:
+				WriteToFile(cmd);
+				break;
+
+			case MyCmd::OP_QUIT:
+				running = false;
+				break;
+
+			default:
+				assert(0);
+				break;
+			}
+		}
+	}
+
+private:
+	MyQueue& que_;
+};
+
+static MyQueue& CommandQueue()
+{
+	static MyQueue s_myQueue;
+	return s_myQueue;
+}
+
+static std::thread* s_myIOThread = nullptr;
+
+void Init()
+{
+	static MyThreadEntry s_myThreadEntry(CommandQueue());
+	s_myIOThread = new std::thread(s_myThreadEntry);
+//	std::thread myThread(s_myThreadEntry);
+//	myThread.detach();
+}
+
+void Shutdown()
+{
+	MyCmd cmd;
+	cmd.op = MyCmd::OP_QUIT;
+	CommandQueue().push(cmd);
+
+	// wait i/o thread quit
+	// std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	s_myIOThread->join();
+	delete s_myIOThread;
+}
+
+}}
+
+template <typename T, int MAX_ITEMS>
+class cache_queue
+{
+public:
+	cache_queue() :
+		write_(0)
+	{
+
+	}
+
+	cache_queue(const cache_queue& rhs) = delete;
+	cache_queue& operator=(const cache_queue&) = delete;
+
+	T& get()
+	{
+		T& ret = data_queue_[write_++];
+		write_ = write_ % MAX_ITEMS;
+		return ret;
+	}
+
+private:
+	T data_queue_[MAX_ITEMS];
+	int write_;
+};
+
+struct FileContext
+{
+	enum { FILENAME_LENGTH = 256, FILE_MAX_LENGTH = (2*1024*1024) };
+	char filename[FILENAME_LENGTH];
+	char data[FILE_MAX_LENGTH];
+	size_t length;
+};
+
+typedef cache_queue<FileContext, 4> FileContextQueue;
+static FileContextQueue& GlobalFileQueue()
+{
+	static FileContextQueue s_fileQueue;
+	return s_fileQueue;
+}
+
+RawFD RawOpenForWriting(const char* filename)
+{
+	FileContext& fc = GlobalFileQueue().get();
+	strcpy(fc.filename, filename);
+	fc.length = 0;
+	return (RawFD)&fc;
+}
+
+void RawWrite(RawFD fd, const char* buf, size_t len)
+{
+	FileContext& fc = *(FileContext*)fd;
+	assert(fc.length + len <= FileContext::FILE_MAX_LENGTH);
+	memcpy(fc.data + fc.length, buf, len);
+	fc.length += len;
+}
+
+void RawClose(RawFD fd)
+{
+	using namespace Fat::AsyncIO;
+
+	FileContext& fc = *(FileContext*)fd;
+	MyCmd cmd;
+	cmd.op = MyCmd::OP_WRITE;
+	cmd.filename = fc.filename;
+	cmd.data     = fc.data;
+	cmd.length   = fc.length;
+	CommandQueue().push(cmd);
+}
+
+
+#else
 
 #if defined(_WIN32) || defined(__CYGWIN__) || defined(__CYGWIN32__)
 
@@ -106,3 +330,5 @@ void RawClose(RawFD fd) {
 }
 
 #endif  // _WIN32 || __CYGWIN__ || __CYGWIN32__
+
+#endif  // FAT_LOGGING_ASYNCIO

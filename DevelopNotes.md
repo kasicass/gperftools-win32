@@ -1,5 +1,10 @@
 # Develop Notes
 
+## 2020-09-16
+
+ * 给 logger.cc 增加异步线程写文件，保证 NewHook / DeleteHook 不触发内存分配
+ * 打开 FAT_LOGGING_ASYNCIO 宏启用，需要手工 Fat::AsyncIO::Init / Shutdown
+
 ## 2020-09-15
 
  * 升级 gperftools 2.8
