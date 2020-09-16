@@ -344,7 +344,8 @@
 // 0x0501 for patch_functions.cc to have access to GetModuleHandleEx.
 // (This latter is an optimization we could take out if need be.)
 #ifndef _WIN32_WINNT
-# define _WIN32_WINNT 0x0501
+// # define _WIN32_WINNT 0x0501
+# define _WIN32_WINNT 0x0600
 #endif
 
 #if defined(_MSC_VER) && _MSC_VER >= 1900

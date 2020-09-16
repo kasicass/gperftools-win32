@@ -39,15 +39,136 @@ DEFINE_int32(verbose, EnvToInt("PERFTOOLS_VERBOSE", 0),
              "Set to numbers >0 for more verbose output, or <0 for less.  "
              "--verbose == -4 means we log fatal errors only.");
 
+#if defined(_WIN32) || defined(__CYGWIN__) || defined(__CYGWIN32__)
+
 #if defined(FAT_LOGGING_ASYNCIO)
 
-#include <queue>
 #include <thread>
-#include <mutex>
-#include <condition_variable>
 #include <assert.h>
 
 namespace Fat { namespace AsyncIO {
+
+//
+// MutexFast
+//
+
+class MutexFast
+{
+	friend class ConditionVariable;
+
+public:
+	MutexFast();
+	~MutexFast();
+
+	void Lock();
+	void Unlock();
+	bool TryLock();
+
+private:
+	MutexFast(const MutexFast& rhs);
+	MutexFast& operator=(const MutexFast& rhs);
+
+private:
+	SRWLOCK srwlock_;
+};
+
+MutexFast::MutexFast() :
+	srwlock_(SRWLOCK_INIT)
+{
+}
+
+MutexFast::~MutexFast()
+{
+}
+
+void MutexFast::Lock()
+{
+	AcquireSRWLockExclusive(&srwlock_);
+}
+
+void MutexFast::Unlock()
+{
+	ReleaseSRWLockExclusive(&srwlock_);
+}
+
+bool MutexFast::TryLock()
+{
+	return TryAcquireSRWLockExclusive(&srwlock_);
+}
+
+//
+// TAutoLock
+//
+
+template <typename T>
+class TAutoLock
+{
+public:
+	TAutoLock(T& lock) : lock_(lock) { lock_.Lock(); }
+	~TAutoLock() { lock_.Unlock(); }
+
+private:
+	TAutoLock();
+	TAutoLock(const TAutoLock<T>&);
+	TAutoLock<T>& operator=(const TAutoLock<T>&);
+
+private:
+	T& lock_;
+};
+
+#define AUTO_LOCK_MUTEXFAST(mutex) TAutoLock<MutexFast> autoLockMutexFast(mutex);
+
+//
+// ConditionVariable
+//
+
+class ConditionVariable
+{
+public:
+	ConditionVariable();
+	~ConditionVariable();
+
+	void Wait(MutexFast& lock);
+	bool TimedWait(MutexFast& lock, uint32 millis);
+	void NotifyOne();
+	void NotifyAll();
+
+private:
+	ConditionVariable(const ConditionVariable& rhs);
+	ConditionVariable& operator=(const ConditionVariable& rhs);
+
+private:
+	CONDITION_VARIABLE cond_;
+};
+
+ConditionVariable::ConditionVariable() :
+	cond_(CONDITION_VARIABLE_INIT)
+{
+}
+
+ConditionVariable::~ConditionVariable()
+{
+}
+
+void ConditionVariable::Wait(MutexFast& lock)
+{
+	TimedWait(lock, INFINITE);
+}
+
+bool ConditionVariable::TimedWait(MutexFast& lock, uint32 millis)
+{
+	return (SleepConditionVariableSRW(&cond_, &lock.srwlock_, millis, ULONG(0)) == TRUE);
+}
+
+void ConditionVariable::NotifyOne()
+{
+	WakeConditionVariable(&cond_);
+}
+
+void ConditionVariable::NotifyAll()
+{
+	WakeAllConditionVariable(&cond_);
+}
 
 template <typename T, int MAX_ITEMS>
 class threadsafe_queue
@@ -60,38 +181,28 @@ public:
 
 	}
 
-	threadsafe_queue(const threadsafe_queue& rhs) = delete;
-	threadsafe_queue& operator=(const threadsafe_queue&) = delete;
-
 	void push(T new_value)
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		AUTO_LOCK_MUTEXFAST(mutex_);
 		data_queue_[write_++] = new_value;
 		write_ = write_ % MAX_ITEMS;
-		cond_.notify_one();
-	}
-
-	bool try_pop(T& value)
-	{
-		std::lock_guard<std::mutex> lock(mutex_);
-		if (data_queue_empty())
-			return false;
-		value = data_queue_[read_++];
-		read_ = read_ % MAX_ITEMS;
-		return true;
+		cond_.NotifyOne();
 	}
 
 	void wait_and_pop(T& value)
 	{
-		std::unique_lock<std::mutex> lock(mutex_);
-		cond_.wait(lock, [this] { return !data_queue_empty(); });
+		AUTO_LOCK_MUTEXFAST(mutex_);
+		while (data_queue_empty())
+		{
+			cond_.Wait(mutex_);
+		}
 		value = data_queue_[read_++];
 		read_ = read_ % MAX_ITEMS;
 	}
 
 	bool empty() const
 	{
-		std::lock_guard<std::mutex> lock(mutex_);
+		AUTO_LOCK_MUTEXFAST(mutex_);
 		return data_queue_empty();
 	}
 
@@ -102,8 +213,11 @@ protected:
 	}
 
 private:
-	mutable std::mutex mutex_;
-	std::condition_variable cond_;
+	threadsafe_queue(const threadsafe_queue& rhs);
+	threadsafe_queue& operator=(const threadsafe_queue&);
+
+	MutexFast mutex_;
+	ConditionVariable cond_;
 	T data_queue_[MAX_ITEMS];
 	int read_;
 	int write_;
@@ -202,9 +316,6 @@ public:
 
 	}
 
-	cache_queue(const cache_queue& rhs) = delete;
-	cache_queue& operator=(const cache_queue&) = delete;
-
 	T& get()
 	{
 		T& ret = data_queue_[write_++];
@@ -213,13 +324,16 @@ public:
 	}
 
 private:
+	cache_queue(const cache_queue& rhs);
+	cache_queue& operator=(const cache_queue&);
+
 	T data_queue_[MAX_ITEMS];
 	int write_;
 };
 
 struct FileContext
 {
-	enum { FILENAME_LENGTH = 256, FILE_MAX_LENGTH = (2*1024*1024) };
+	enum { FILENAME_LENGTH = 256, FILE_MAX_LENGTH = (2 * 1024 * 1024) };
 	char filename[FILENAME_LENGTH];
 	char data[FILE_MAX_LENGTH];
 	size_t length;
@@ -256,15 +370,12 @@ void RawClose(RawFD fd)
 	MyCmd cmd;
 	cmd.op = MyCmd::OP_WRITE;
 	cmd.filename = fc.filename;
-	cmd.data     = fc.data;
-	cmd.length   = fc.length;
+	cmd.data = fc.data;
+	cmd.length = fc.length;
 	CommandQueue().push(cmd);
 }
 
-
 #else
-
-#if defined(_WIN32) || defined(__CYGWIN__) || defined(__CYGWIN32__)
 
 // While windows does have a POSIX-compatible API
 // (_open/_write/_close), it acquires memory.  Using this lower-level
@@ -295,6 +406,8 @@ void RawWrite(RawFD handle, const char* buf, size_t len) {
 void RawClose(RawFD handle) {
   CloseHandle(handle);
 }
+
+#endif  // FAT_LOGGING_ASYNCIO
 
 #else  // _WIN32 || __CYGWIN__ || __CYGWIN32__
 
@@ -331,4 +444,3 @@ void RawClose(RawFD fd) {
 
 #endif  // _WIN32 || __CYGWIN__ || __CYGWIN32__
 
-#endif  // FAT_LOGGING_ASYNCIO

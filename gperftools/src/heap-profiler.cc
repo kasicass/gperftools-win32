@@ -347,6 +347,7 @@ static void RecordFree(const void* ptr) {
 void NewHook(const void* ptr, size_t size) {
   // recording_alloc will miss some recording, FAT_LOGGING_ASYNCIO fix it
 #if defined(FAT_LOGGING_ASYNCIO)
+  if (ptr != NULL && dumping) { int *p = (int*)0x10; *p = 10; }
   if (ptr != NULL) RecordAlloc(ptr, size, 0);
 #else
   if (ptr != NULL && !recording_alloc)
@@ -361,6 +362,7 @@ void NewHook(const void* ptr, size_t size) {
 // static
 void DeleteHook(const void* ptr) {
 #if defined(FAT_LOGGING_ASYNCIO)
+  if (ptr != NULL && dumping) { int *p = (int*)0x10; *p = 10; }
   if (ptr != NULL) RecordFree(ptr);
 #else
   if (ptr != NULL && !recording_alloc)
