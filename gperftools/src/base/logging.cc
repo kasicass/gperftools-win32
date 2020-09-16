@@ -174,20 +174,20 @@ void Init()
 {
 	static MyThreadEntry s_myThreadEntry(CommandQueue());
 	s_myIOThread = new std::thread(s_myThreadEntry);
-//	std::thread myThread(s_myThreadEntry);
-//	myThread.detach();
 }
 
 void Shutdown()
 {
-	MyCmd cmd;
-	cmd.op = MyCmd::OP_QUIT;
-	CommandQueue().push(cmd);
+	if (s_myIOThread)
+	{
+		MyCmd cmd;
+		cmd.op = MyCmd::OP_QUIT;
+		CommandQueue().push(cmd);
 
-	// wait i/o thread quit
-	// std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	s_myIOThread->join();
-	delete s_myIOThread;
+		// wait i/o thread quit
+		s_myIOThread->join();
+		delete s_myIOThread;
+	}
 }
 
 }}

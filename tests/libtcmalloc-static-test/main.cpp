@@ -5,13 +5,6 @@ extern "C" void HeapProfilerStart(const char* prefix);
 extern "C" void HeapProfilerDump(const char *reason);
 extern "C" void HeapProfilerStop();
 
-namespace Fat { namespace AsyncIO {
-
-void Init();
-void Shutdown();
-
-}}
-
 void *mallocMe(unsigned int n)
 {
 	return malloc(n);
@@ -19,8 +12,8 @@ void *mallocMe(unsigned int n)
 
 int main()
 {
-	Fat::AsyncIO::Init();
-	HeapProfilerStart("D:\\heap");
+	// set by vc: "HEAPPROFILE=heap", below is ignore
+	// HeapProfilerStart("D:\\heap");
 
 	::Sleep(1000);
 
@@ -70,8 +63,7 @@ int main()
 
 	::Sleep(1000);
 
-	Fat::AsyncIO::Shutdown();
-	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
+//	HeapProfilerStop();  // should call this manually, or it'll crashed in VS2015
 	return 0;
 }
 

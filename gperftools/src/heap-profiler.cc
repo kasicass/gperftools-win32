@@ -178,6 +178,10 @@ static int64 last_dump_time = 0;      // The time of the last dump
 
 static HeapProfileTable* heap_profile = NULL;  // the heap profile table
 
+#if !defined(FAT_LOGGING_ASYNCIO)
+static bool  recording_alloc = false; // make NewHook / DeleteHook don't re-enter, re-enter a spinlock in one thread will make us blocked
+#endif
+
 //----------------------------------------------------------------------
 // Profile generation
 //----------------------------------------------------------------------
@@ -341,12 +345,31 @@ static void RecordFree(const void* ptr) {
 
 // static
 void NewHook(const void* ptr, size_t size) {
+  // recording_alloc will miss some recording, FAT_LOGGING_ASYNCIO fix it
+#if defined(FAT_LOGGING_ASYNCIO)
   if (ptr != NULL) RecordAlloc(ptr, size, 0);
+#else
+  if (ptr != NULL && !recording_alloc)
+  {
+	  recording_alloc = true;
+	  RecordAlloc(ptr, size, 0);
+	  recording_alloc = false;
+  }
+#endif
 }
 
 // static
 void DeleteHook(const void* ptr) {
+#if defined(FAT_LOGGING_ASYNCIO)
   if (ptr != NULL) RecordFree(ptr);
+#else
+  if (ptr != NULL && !recording_alloc)
+  {
+    recording_alloc = true;
+    RecordFree(ptr);
+	recording_alloc = false;
+  }
+#endif
 }
 
 // TODO(jandrews): Re-enable stack tracing
@@ -564,6 +587,11 @@ static void HeapProfilerInit() {
   if (!GetUniquePathFromEnv("HEAPPROFILE", fname)) {
     return;
   }
+
+#if defined(FAT_LOGGING_ASYNCIO)
+  Fat::AsyncIO::Init();
+#endif
+
   // We do a uid check so we don't write out files in a setuid executable.
 #ifdef HAVE_GETEUID
   if (getuid() != geteuid()) {
@@ -613,6 +641,10 @@ struct HeapProfileEndWriter {
       snprintf(buf, sizeof(buf), ("Exiting"));
     }
     HeapProfilerDump(buf);
+
+#if defined(FAT_LOGGING_ASYNCIO)
+	Fat::AsyncIO::Shutdown();
+#endif
   }
 };
 
