@@ -27,7 +27,7 @@ class HeapProfileAddressTable(object):
 		for libName, (begin, addrList) in libDict.iteritems():
 			moduleBase = DbgHelp.SymLoadModuleEx(hProcess, libName)
 			if not moduleBase:
-				# print 'SymLoadModuleEx(%s) failed' % libName
+				print 'SymLoadModuleEx(%s) failed' % libName
 				continue
 
 			for addr in addrList:
@@ -41,7 +41,7 @@ class HeapProfileAddressTable(object):
 		DbgHelp.SymCleanup(hProcess)
 
 	def addr2name(self, addr):
-		return self.addrDict[addr]
+		return self.addrDict.get(addr, ('func??', 'file??', 0))
 
 if __name__ == '__main__':
 	import sys

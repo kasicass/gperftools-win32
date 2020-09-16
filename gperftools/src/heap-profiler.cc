@@ -180,6 +180,8 @@ static HeapProfileTable* heap_profile = NULL;  // the heap profile table
 
 #if !defined(FAT_LOGGING_ASYNCIO)
 static bool  recording_alloc = false; // make NewHook / DeleteHook don't re-enter, re-enter a spinlock in one thread will make us blocked
+#else
+static bool  recording_alloc = false;
 #endif
 
 //----------------------------------------------------------------------
@@ -325,7 +327,10 @@ static void RecordAlloc(const void* ptr, size_t bytes, int skip_count) {
   int depth = HeapProfileTable::GetCallerStackTrace(skip_count + 1, stack);
   SpinLockHolder l(&heap_lock);
   if (is_on) {
+    if (recording_alloc) { int* p = (int*)0x10; *p = 10; }
+    recording_alloc = true;
     heap_profile->RecordAlloc(ptr, bytes, depth, stack);
+	recording_alloc = false;
     MaybeDumpProfileLocked();
   }
 }
@@ -334,7 +339,10 @@ static void RecordAlloc(const void* ptr, size_t bytes, int skip_count) {
 static void RecordFree(const void* ptr) {
   SpinLockHolder l(&heap_lock);
   if (is_on) {
+	if (recording_alloc) { int* p = (int*)0x10; *p = 10; }
+    recording_alloc = true;
     heap_profile->RecordFree(ptr);
+	recording_alloc = false;
     MaybeDumpProfileLocked();
   }
 }
@@ -347,7 +355,7 @@ static void RecordFree(const void* ptr) {
 void NewHook(const void* ptr, size_t size) {
   // recording_alloc will miss some recording, FAT_LOGGING_ASYNCIO fix it
 #if defined(FAT_LOGGING_ASYNCIO)
-  if (ptr != NULL && dumping) { int *p = (int*)0x10; *p = 10; }
+//  if (ptr != NULL && dumping) { int *p = (int*)0x10; *p = 10; }
   if (ptr != NULL) RecordAlloc(ptr, size, 0);
 #else
   if (ptr != NULL && !recording_alloc)
@@ -362,7 +370,7 @@ void NewHook(const void* ptr, size_t size) {
 // static
 void DeleteHook(const void* ptr) {
 #if defined(FAT_LOGGING_ASYNCIO)
-  if (ptr != NULL && dumping) { int *p = (int*)0x10; *p = 10; }
+//  if (ptr != NULL && dumping) { int *p = (int*)0x10; *p = 10; }
   if (ptr != NULL) RecordFree(ptr);
 #else
   if (ptr != NULL && !recording_alloc)
