@@ -327,10 +327,7 @@ static void RecordAlloc(const void* ptr, size_t bytes, int skip_count) {
   int depth = HeapProfileTable::GetCallerStackTrace(skip_count + 1, stack);
   SpinLockHolder l(&heap_lock);
   if (is_on) {
-    if (recording_alloc) { int* p = (int*)0x10; *p = 10; }
-    recording_alloc = true;
     heap_profile->RecordAlloc(ptr, bytes, depth, stack);
-	recording_alloc = false;
     MaybeDumpProfileLocked();
   }
 }
@@ -339,10 +336,7 @@ static void RecordAlloc(const void* ptr, size_t bytes, int skip_count) {
 static void RecordFree(const void* ptr) {
   SpinLockHolder l(&heap_lock);
   if (is_on) {
-	if (recording_alloc) { int* p = (int*)0x10; *p = 10; }
-    recording_alloc = true;
     heap_profile->RecordFree(ptr);
-	recording_alloc = false;
     MaybeDumpProfileLocked();
   }
 }
@@ -360,9 +354,7 @@ void NewHook(const void* ptr, size_t size) {
 #else
   if (ptr != NULL && !recording_alloc)
   {
-	  recording_alloc = true;
 	  RecordAlloc(ptr, size, 0);
-	  recording_alloc = false;
   }
 #endif
 }
@@ -375,9 +367,7 @@ void DeleteHook(const void* ptr) {
 #else
   if (ptr != NULL && !recording_alloc)
   {
-    recording_alloc = true;
     RecordFree(ptr);
-	recording_alloc = false;
   }
 #endif
 }
