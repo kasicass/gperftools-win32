@@ -1,5 +1,5 @@
 # usage:
-#   python PrintHeapMax.py -l 50 xxx.heap    # print liveBytes >= 50Mb callstacks
+#   python PrintHeapMax.py -l 50 xxx.heap    # print liveBytes >= 50 bytes callstacks
 
 import sys
 import argparse
@@ -8,7 +8,7 @@ import HeapProfileAddressTable
 
 if __name__ == '__main__':
 	ap = argparse.ArgumentParser(description='Print callstacks that liveBytes >= LIMIT Bytes')
-	ap.add_argument('-l', '--limit', dest='limit', type=float, default=0.1, help='> LIMIT Bytes to print')
+	ap.add_argument('-l', '--limit', dest='limit', type=float, default=1, help='> LIMIT Bytes to print')
 	ap.add_argument('filename', help='.heap file to parse')
 	args = ap.parse_args()
 
